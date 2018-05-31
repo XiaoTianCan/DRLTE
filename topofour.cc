@@ -1,0 +1,120 @@
+/* -*- Mode:C++; c-file-style:"gnu"; indent-tabs-mode:nil; -*- */
+/*
+ * topology with four routers and two clients
+ * client 1,2
+ * routers 1,2,3,4
+ */
+#include <iostream>
+#include <fstream>
+#include <vector>
+
+#include "ns3/core-module.h"
+#include "ns3/network-module.h"
+#include "ns3/internet-module.h"
+#include "ns3/point-to-point-module.h"
+#include "ns3/applications-module.h"
+#include "ns3/ipv4-global-routing-helper.h"
+
+using namespace ns3;
+using namespace std;
+
+NS_LOG_COMPONENT_DEFINE ("TopoFour");
+
+int main (int argc, char *argv[])
+{
+  int i;
+  NS_LOG_UNCOND ("This is a simple demo of ns3. Version 1.0");
+  CommandLine cmd;
+  cmd.Parse(argc, argv);
+  
+  //Config::SetDefault("ns3::TcpL4Protocol::SocketType", StringValue("ns3::TcpReno"));
+  Config::SetDefault("ns3::OnOffApplication::PacketSize", UintegerValue(1024));
+  Config::SetDefault("ns3::OnOffApplication::DataRate", StringValue("50Mb/s"));
+  
+  cout<<"Create node"<<endl;
+  NodeContainer client1, client2, routers;
+  client1.Create(1);
+  client2.Create(1);
+  routers.Create(4);
+  NodeContainer nodes = NodeContainer(client1, client2, routers);
+  
+  vector<NodeContainer> adjList(7);
+  adjList[0] = NodeContainer(client1.Get(0), routers.Get(0));
+  adjList[1] = NodeContainer(client2.Get(0), routers.Get(2));
+  adjList[2] = NodeContainer(routers.Get(0), routers.Get(1));
+  adjList[3] = NodeContainer(routers.Get(1), routers.Get(2));
+  adjList[4] = NodeContainer(routers.Get(2), routers.Get(3));
+  adjList[5] = NodeContainer(routers.Get(3), routers.Get(0));
+  adjList[6] = NodeContainer(routers.Get(0), routers.Get(2));
+  
+  cout<<"Create link"<<endl;
+  vector<PointToPointHelper> p2p(7);
+  for(i = 0; i < 7; i++) {
+    p2p[i].SetDeviceAttribute("DataRate", StringValue("50Mbps"));
+    p2p[i].SetChannelAttribute("Delay", StringValue("50ms"));
+  }
+  
+  cout<<"Create device"<<endl;
+  vector<NetDeviceContainer> devices(7);
+  for(i = 0; i < 7; i++) {
+    devices[i] = p2p[i].Install(adjList[i]);
+  }
+  
+  cout<<"Create stack"<<endl;
+  InternetStackHelper stack;
+  stack.Install(nodes);
+  
+  cout<<"Create address"<<endl;
+  Ipv4AddressHelper address;
+  vector<Ipv4InterfaceContainer> interfaces(7);
+  for(i = 0; i < 7; i++) {
+    ostringstream subset;
+    subset<<"10.0."<<i+1<<".0";
+    address.SetBase(subset.str().c_str(), "255.255.255.0");
+    interfaces[i] = address.Assign(devices[i]);
+  }
+  cout<<"Create route"<<endl;
+  Ipv4GlobalRoutingHelper::PopulateRoutingTables();
+  
+  cout<<"Create server"<<endl;
+  uint16_t servPort = 5678;
+  ApplicationContainer sinkApp;
+  Address sinkLocalAddress(InetSocketAddress(Ipv4Address::GetAny(), servPort));
+  PacketSinkHelper sinkHelper("ns3::TcpSocketFactory", sinkLocalAddress);
+  sinkApp.Add(sinkHelper.Install(client2.Get(0)));
+  sinkApp.Start(Seconds(0.0));
+  sinkApp.Stop(Seconds(60.0));
+  
+  /*install client*/
+  cout<<"Create client"<<endl;
+  OnOffHelper clientHelper("ns3::TcpSocketFactory", Address());
+  clientHelper.SetAttribute("OnTime", StringValue("ns3::ConstantRandomVariable[Constant=1]"));
+  clientHelper.SetAttribute("OffTime", StringValue("ns3::ConstantRandomVariable[Constant=0]"));
+  
+  uint16_t clientPort = 6789;
+  ApplicationContainer clientApp;
+  AddressValue remoteAddress(InetSocketAddress(interfaces[1].GetAddress(0), clientPort));
+  clientHelper.SetAttribute("Remote", remoteAddress);
+  clientApp = clientHelper.Install(client1.Get(0));
+  
+  clientApp.Start(Seconds(0.0));
+  clientApp.Stop(Seconds(60.0));
+  
+  cout<<"Create pcap"<<endl;
+  /*
+  for(i = 0; i < 7; i++) {
+    p2p[i].EnablePcapAll("mytest");
+  }
+  Ptr<PacketSink> pktSink;
+  cout<<"RX="<<pktSink->GetTotalRx()<<"bytes"<<endl;*/
+  
+
+  Simulator::Run ();
+  Simulator::Destroy ();
+  return 0;
+}
+
+
+
+
+
