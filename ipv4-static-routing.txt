@@ -31,6 +31,7 @@
 #include "ns3/ptr.h"
 #include "ns3/ipv4.h"
 #include "ns3/ipv4-routing-protocol.h"
+#include "ns3/tag.h"
 
 namespace ns3 {
 
@@ -42,6 +43,29 @@ class Ipv4Header;
 class Ipv4RoutingTableEntry;
 class Ipv4MulticastRoutingTableEntry;
 class Node;
+
+
+/*added by gn 2018/6/19*/
+class myTag : public Tag
+{
+public:
+  static TypeId GetTypeId(void);
+  virtual TypeId GetInstanceTypeId(void) const;
+  virtual uint32_t GetSerializedSize(void) const;
+  virtual void Serialize(TagBuffer i) const;
+  virtual void Deserialize(TagBuffer i);
+  virtual void Print(std::ostream &os) const;
+  void SetValue1(double value);
+  double GetValue1();
+  void SetValue2(uint16_t value);
+  uint16_t GetValue2();
+  void SetValue3(uint16_t value);
+  uint16_t GetValue3();
+private:
+  double tagValue1;
+  uint16_t tagValue2;
+  uint16_t tagValue3;
+};
 
 /**
  * \ingroup ipv4Routing
@@ -432,4 +456,3 @@ private:
 } // Namespace ns3
 
 #endif /* IPV4_STATIC_ROUTING_H */
-

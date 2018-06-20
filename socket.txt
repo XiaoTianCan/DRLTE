@@ -23,8 +23,9 @@
 #ifndef NS3_SOCKET_H
 #define NS3_SOCKET_H
 
-#include <stdio.h>
-#include <stdlib.h>
+#include <stdio.h>//added by gn
+#include <stdlib.h>//added by gn
+
 #include "ns3/callback.h"
 #include "ns3/ptr.h"
 #include "ns3/tag.h"
@@ -36,7 +37,6 @@
 #include "ns3/inet6-socket-address.h"
 
 namespace ns3 {
-
 
 class Node;
 class Packet;
@@ -73,12 +73,12 @@ public:
    * \return the object TypeId
    */
   static TypeId GetTypeId (void);
+  std::vector<double> dels;
+  std::vector<double> thrs;
 
   Socket (void);
   virtual ~Socket (void);
-  
-  std::vector<double> dels;
-  std::vector<double> thrs;
+
   /**
    * \enum SocketErrno
    * \brief Enumeration of the possible errors returned by a socket.
@@ -1398,4 +1398,3 @@ private:
 } // namespace ns3
 
 #endif /* NS3_SOCKET_H */
-

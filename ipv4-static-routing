@@ -31,6 +31,10 @@
 #include "ns3/simulator.h"
 #include "ns3/ipv4-route.h"
 #include "ns3/output-stream-wrapper.h"
+
+#include "ns3/point-to-point-net-device.h"
+#include "ns3/queue.h"
+
 #include "ipv4-static-routing.h"
 #include "ipv4-routing-table-entry.h"
 
@@ -550,7 +554,30 @@ Ipv4StaticRouting::RouteInput  (Ptr<const Packet> p, const Ipv4Header &ipHeader,
   if (rtentry != 0)
     {
       NS_LOG_LOGIC ("Found unicast destination- calling unicast callback");
-      ucb (rtentry, p, ipHeader);  // unicast forwarding callback
+      /*added by gn 2018/6/19*/
+      //get queue length
+      Ptr<NetDevice> nd = rtentry->GetOutputDevice();
+      Ptr<PointToPointNetDevice> p2pnd = StaticCast<PointToPointNetDevice> (nd);
+      Ptr<Queue> queue = p2pnd->GetQueue ();
+      uint16_t qSize = queue->GetNPackets ();
+      //new a packet
+      Ptr<Packet> packet = p->Copy();//Create<Packet>(1024);
+      //add and set tag value
+      myTag tag;
+      p->PeekPacketTag(tag);
+
+      uint16_t tmp1 = tag.GetValue3();
+      if (qSize > tmp1) {
+        tag.SetValue3(qSize);
+      }
+      NS_LOG_INFO (tmp1);
+      packet->ReplacePacketTag(tag); 
+      //send out packet
+      ucb (rtentry, packet, ipHeader);
+      /*addition ended*/
+
+      
+      //ucb (rtentry, p, ipHeader);  // unicast forwarding callback
       return true;
     }
   else
@@ -742,5 +769,72 @@ Ipv4StaticRouting::PrintRoutingTable (Ptr<OutputStreamWrapper> stream) const
   *os << std::endl;
 }
 
-} // namespace ns3
+/*added by gn 2018/6/19*/
+TypeId myTag::GetTypeId(void)
+{
+  static TypeId tid=TypeId("ns3::myTag")
+	.SetParent<Tag>()
+	.AddConstructor<myTag>();
+  return tid;
+}
 
+TypeId myTag::GetInstanceTypeId(void) const
+{
+  return GetTypeId();
+}
+
+uint32_t myTag::GetSerializedSize(void) const 
+{
+  return 12;//14
+}
+
+void myTag::Serialize(TagBuffer i) const 
+{
+  i.WriteDouble(tagValue1);
+  i.WriteU16(tagValue2);
+  i.WriteU16(tagValue3);
+}
+
+void myTag::Deserialize(TagBuffer i) 
+{
+  tagValue1=i.ReadDouble();
+  tagValue2=i.ReadU16();
+  tagValue3=i.ReadU16();
+}
+
+void myTag::Print(std::ostream &os) const 
+{
+  //os<<"tagvalue1="<<tagValue1<<", tagvalue2="<<tagValue2<<", tagValue3="<<tagValue3<<endl;
+  //os<<"tagvalue1="<<tagValue1<<", tagvalue2="<<tagValue2<<endl;
+}
+
+void myTag::SetValue1(double value) 
+{
+  tagValue1=value;
+}
+
+double myTag::GetValue1() 
+{
+  return tagValue1;
+}
+
+void myTag::SetValue2(uint16_t value)
+{
+  tagValue2=value;
+}
+
+uint16_t myTag::GetValue2()
+{
+  return tagValue2;
+}
+void myTag::SetValue3(uint16_t value)
+{
+  tagValue3=value;
+}
+
+uint16_t myTag::GetValue3()
+{
+  return tagValue3;
+}
+
+} // namespace ns3
