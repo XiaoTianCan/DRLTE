@@ -75,6 +75,7 @@ public:
   static TypeId GetTypeId (void);
   std::vector<double> dels;
   std::vector<double> thrs;
+  std::vector<uint16_t> qSizes;
 
   Socket (void);
   virtual ~Socket (void);
