@@ -1,11 +1,21 @@
 /*
 Simulation environment for DRL-TE
-V1.2
-Time:2018/6/16
+V1.3
+Time:2018/6/19
 Changes:
-1. add global variable outputFile. The file for plot will be opened only once
-2. modified poisson packet send method
-3. printEnable 3 levels
+1. add ECN
+1.1 remove class myTag to ipv4-static-routing.h/.c
+1.2 add tagValue3 to carry the maximum qsize along the path
+1.3 get the value in env.cc
+1.4 store it in endsocket for the use of update()
+2. standard the LOGs
+NS_LOG_ERROR — error
+NS_LOG_WARN — warning
+NS_LOG_DEBUG — not common information
+NS_LOG_INFO — usual information, set this level when simulation
+NS_LOG_FUNCTION — print function calling information and session related information
+NS_LOG_LOGIC – print topology construction information and packet related information
+NS_LOG_ALL — all the information in sub-functions, no related function to LOG
 */
 #include <stdio.h>
 #include <stdlib.h>
@@ -44,7 +54,7 @@ Changes:
 using namespace ns3;
 using namespace std;
 
-NS_LOG_COMPONENT_DEFINE ("SocketBoundUdpRoutingExample");
+NS_LOG_COMPONENT_DEFINE ("DrlEnv");
 
 typedef pair<int, int> Edge;
 bool printEnable0;//init related
@@ -65,15 +75,14 @@ public:
   void initNodes();
   void initPaths();
   void initAddrs();
-  //void initRoute();
   void initStaticRoute();
   void initSocket();
   
   void begin();
   void randSendData(int iSession, uint8_t *data);
   void update();
-  void update(vector<vector<int>> pacNos, vector<vector<double>> dels, vector<vector<double>> thrs);
-  void saveToFile(vector<vector<int>> pacNos, vector<vector<double>> dels, vector<vector<double>> thrs);
+  void update(vector<vector<int>> pacNos, vector<vector<double>> dels, vector<vector<double>> thrs, vector<vector<uint32_t>> ECNpkts);
+  void saveToFile(vector<vector<int>> pacNos, vector<vector<double>> dels, vector<vector<double>> thrs, vector<vector<uint32_t>> ECNpkts);
 
   void setSendRate(vector<string> rates);
   void setCap(string rate);
@@ -84,6 +93,7 @@ public:
   void setInputPath(string path);
   void setOutputPath(string path);
   void setErrp(double err);
+  void setECNqThr(uint16_t thr);
   void randRatio();
   void meanRatio();
   int spsToEdge(int sess, int path, int step);
@@ -96,6 +106,7 @@ private:
   double err_p;
   double thrSum;
   double delSum;
+  uint16_t ECNqThr;
   int upNum;
   string inputPath;
   string outputPath;
@@ -141,25 +152,6 @@ private:
   vector<ApplicationContainer> sinkApps;
 };
 
-class myTag : public Tag
-{
-public:
-  static TypeId GetTypeId(void);
-  virtual TypeId GetInstanceTypeId(void) const;
-  virtual uint32_t GetSerializedSize(void) const;
-  virtual void Serialize(TagBuffer i) const;
-  virtual void Deserialize(TagBuffer i);
-  virtual void Print(std::ostream &os) const;
-  void SetValue1(double value);
-  double GetValue1();
-  void SetValue2(double value);
-  double GetValue2();
-private:
-  double tagValue1;
-  double tagValue2;
-};
-
-
 double getRand();
 int getRand(vector<double> ratio);
 int indexOf(vector<Edge> container, Edge value);
@@ -167,20 +159,30 @@ string doubleToString(double d);
 void UdpSend(Ptr<Socket> sock, Ptr<Packet> packet, int sess, int path);
 void recvCallback(Ptr<Socket> socket);
 
+
 //-----< main function >-----
 int main(int argc, char *argv[])
 {
+  #if 1 //for simulation
+  LogComponentEnable ("DrlEnv", LOG_LEVEL_INFO);
+  #elif 0 //for logic debug
+  LogComponentEnableAll (LOG_PREFIX_TIME);//print time before each log information
+  LogComponentEnable ("DrlEnv", LOG_LEVEL_FUNCTION);
+  LogComponentEnable ("Ipv4StaticRouting", LOG_LEVEL_ERROR);
+  #else //for packet-level debug
   LogComponentEnableAll (LOG_PREFIX_TIME);
-  LogComponentEnable ("SocketBoundUdpRoutingExample", LOG_LEVEL_INFO);
+  LogComponentEnable ("DrlEnv", LOG_LEVEL_LOGIC);
+  #endif
   
   string inputPath("./scratch/DRLTE/input.txt");
   string outputPath("./scratch/DRLTE/output.txt");
   string envPath("/home/gn/geng/drl_te/agent/");//python environment?????
 
   int upTime=500;//ms
-  int stopTime=7;//s
+  int stopTime=6;//s
   int packetSize=1024;
-  double err_p=0.0;//?????????????????0
+  double err_p=0.0;//?????0
+  uint16_t ECNqThr=200;
   uint32_t seed=1;//hear is OK??
   
   printEnable0=false;
@@ -206,9 +208,10 @@ int main(int argc, char *argv[])
   SeedManager::SetRun(seed);
 
 //----------------------------------------------------------------
-  cout<<"DrlRouting init begin!"<<endl;
+  NS_LOG_INFO("DrlRouting init begin!");
   DrlRouting drl=DrlRouting();
   drl.setErrp(err_p);
+  drl.setECNqThr(ECNqThr);
   drl.setInputPath(inputPath);
   drl.setOutputPath(outputPath);
   drl.setUpTime(upTime);
@@ -228,6 +231,7 @@ DrlRouting::DrlRouting()
   err_p=0.0;
   thrSum=0;//total throughput
   delSum=0;//total delay
+  ECNqThr=200;
   upNum=0;//number of scheduling
   inputPath="";//the filepath of file for paths
   outputPath="";//the filepath of the file for plot
@@ -257,7 +261,7 @@ DrlRouting::~DrlRouting()
   if(outputFile) outputFile.close();
   delete []data;
   data = NULL;
-  std::cout<<"Simulation is end!"<<endl;
+  NS_LOG_INFO(std::endl<<"Simulation is end!");
 }
 
 /*tool functions:*/
@@ -352,10 +356,10 @@ void DrlRouting::init()
 }
 void DrlRouting::addPathsFromFile()
 {
-  if(printEnable0) std::cout<<"addPathFromFile()"<<std::endl;
+  NS_LOG_FUNCTION("addPathFromFile()");
   std::ifstream in(inputPath.c_str());
   if(!in.is_open()){
-    std::cout<<"Error opening file"<<std::endl;
+    NS_LOG_ERROR("Error opening file");
     exit(1);
   }
   char buffer[500];
@@ -367,7 +371,7 @@ void DrlRouting::addPathsFromFile()
     in.getline(buffer, 500);
     if(strcmp(buffer, "succeed")==0) break;//"succeed" means the end of paths
     if(strcmp(buffer, "fail")==0){
-      cout<<"file information error!!!"<<endl;
+      NS_LOG_ERROR("file information error!!!");
       exit(1);
     }
     string str(buffer);
@@ -385,7 +389,7 @@ void DrlRouting::addPathsFromFile()
   in.getline(buffer, 500);//send rates of the sessions
   in.close();
   string str(buffer);
-  if(printEnable0) std::cout<<"send rate:"<<str<<std::endl;
+  NS_LOG_FUNCTION("session send rates: " << str);
   vector<string> v_sendRate;
   unsigned int start=0;
   unsigned int end=0;
@@ -449,7 +453,7 @@ void DrlRouting::initNodes()
 
 void DrlRouting::initPaths()
 {
-  if(printEnable0) cout<<"initPaths()"<<endl;
+  NS_LOG_FUNCTION("initPaths()");
   p2p.SetDeviceAttribute("DataRate", DataRateValue(cap));//set link attributes
   p2p.SetChannelAttribute("Delay", StringValue(linkDelay));
 
@@ -472,11 +476,11 @@ void DrlRouting::initPaths()
         int dir= i1<i2 ? 1 : -1;
         if(edgeNo>=0){
           pePaths.push_back((edgeNo+1)*dir);
-          if(printEnable0) cout<<"session:"<<i<<", path:"<<j<<", step:"<<k<<". edge:("<<i1<<"->"<<i2<<")="<<pePaths.back()<<endl;
+          NS_LOG_LOGIC("session:"<<i<<", path:"<<j<<", step:"<<k<<". edge:("<<i1<<"->"<<i2<<")="<<pePaths.back());
           continue;
         }
         pePaths.push_back((edges.size()+1)*dir);
-        if(printEnable0) cout<<"session:"<<i<<", path:"<<j<<", step:"<<k<<". edge:("<<i1<<"->"<<i2<<")="<<pePaths.back()<<endl;
+        NS_LOG_LOGIC("session:"<<i<<", path:"<<j<<", step:"<<k<<". edge:("<<i1<<"->"<<i2<<")="<<pePaths.back());
         edges.push_back(edgePair);
         Ptr<Node> n1=nodes.Get(is);
         Ptr<Node> n2=nodes.Get(ib);
@@ -495,18 +499,18 @@ void DrlRouting::initPaths()
 
 void DrlRouting::initAddrs()
 {
-  if(printEnable0) cout<<"initAddrs()"<<endl;
+  NS_LOG_FUNCTION("initAddrs()");
   for(unsigned int i=0; i<spDevices.size(); i++){
     string addr=getAddr(i);
     ipv4.SetBase(addr.c_str(), "255.255.255.0");
     address.push_back(ipv4.Assign(spDevices[i]));
-    if(printEnable0) cout<<"edge "<<i<<" small node:"<<address.back().GetAddress(0)<<"big node:"<<address.back().GetAddress(1)<<endl;
+    NS_LOG_LOGIC("edge "<<i<<" small node:"<<address.back().GetAddress(0)<<"big node:"<<address.back().GetAddress(1));
   }
   return;
 }
 void DrlRouting::initStaticRoute()
 {
-  if(printEnable0) cout<<"initStaticRoute()"<<endl;
+  NS_LOG_FUNCTION("initStaticRoute()");
   for(int i=0; i<nodeNum; i++){
     Ptr<Ipv4> ipv4Node=nodes.Get(i)->GetObject<Ipv4>();
     Ptr<Ipv4StaticRouting> srNode=srHelper.GetStaticRouting(ipv4Node);
@@ -528,7 +532,7 @@ void DrlRouting::initStaticRoute()
         Ipv4Address addrNext=address[spsToEdge(i, j, k)].GetAddress(spsEnd(i, j, k)-1);
         int itf=ipv4Node->GetInterfaceForAddress(addr);
         int itfNext=ipv4NodeNext->GetInterfaceForAddress(addrNext);
-        if(printEnable0) cout<<"addrSrc:"<<addrSrc<<", end addr:"<<addrEnd<<", cur addr:"<<addr<<", next hop:"<<addrNext<<endl;
+        NS_LOG_LOGIC("addrSrc:"<<addrSrc<<", end addr:"<<addrEnd<<", cur addr:"<<addr<<", next hop:"<<addrNext);
         srNodes[nodei]->AddHostRouteTo(addrEnd, addrNext, itf);//paras:destination address;	next hop address; interface index; Metric of route in case of multiple routes to same destination
         srNodes[nodeiNext]->AddHostRouteTo(addrSrc, addr, itfNext);
       }
@@ -538,7 +542,7 @@ void DrlRouting::initStaticRoute()
 }
 void DrlRouting::initSocket()
 {
-  if(printEnable0) cout<<"initSocket()"<<endl;
+  NS_LOG_FUNCTION("initSocket()");
   
   for(int i=0; i<sessionNum; i++)
   {
@@ -566,7 +570,7 @@ void DrlRouting::initSocket()
       srcSocks.push_back(srcSock);
       endSocks.push_back(endSock);
     }
-    if(printEnable0) cout<<"session "<<i<<" connected"<<endl;
+    NS_LOG_LOGIC("session "<<i<<" connected");
     endsSocks.push_back(endSocks);
     srcsSocks.push_back(srcSocks);
   }
@@ -581,18 +585,19 @@ void DrlRouting::begin()
   if(file) file.close();
   outputFile.open(outputPath.c_str(), std::ios::app);
   if(!outputFile){
-    std::cout<<outputPath<<" can't open"<<std::endl;
-    return;
+    NS_LOG_ERROR(outputPath<<" can't open");
+    exit(1);
   }
   
   lastSec=Simulator::Now().GetSeconds();
+  NS_LOG_INFO(std::endl<<"begin(), time:"<<lastSec<<"s, stopTime:"<<stopTime<<"s");
   for(int i=0; i<sessionNum; i++){
     for(unsigned int j=0; j<sPaths[i].size(); j++){
       endsSocks[i][j]->thrs.clear();
       endsSocks[i][j]->dels.clear();
+      endsSocks[i][j]->qSizes.clear();
     }
     Simulator::ScheduleNow(&DrlRouting::randSendData, this, i, data);
-    if(printEnable0) cout<<"begin(), time:"<<lastSec<<endl;
   }
 }
 
@@ -605,14 +610,12 @@ void DrlRouting::randSendData(int iSession, uint8_t *data)//size is the total am
   int iPath=getRand(sRatios[iSession]);//select a path
   int realPacSize = packetSize;
   Ptr<Packet> packet=Create<Packet>(data, realPacSize);
-  if(printEnable1) std::cout<<"randSend, packet size:"<<realPacSize<<endl;
   
   #if 1//my way
   double dataRate_b=sendRates[iSession].GetBitRate();
   if(dataRate_b==0) return;
   double unit_t = 0.001;//s
   double lamda = dataRate_b*unit_t/(realPacSize*8);
-  //std::cout<<"lamda:"<<lamda<<endl;
   double micros=1000*ExpDstrib->GetValue(1/lamda, 1/lamda*5);
   
   #elif 0//author's method
@@ -621,7 +624,6 @@ void DrlRouting::randSendData(int iSession, uint8_t *data)//size is the total am
   int ns=micros*1000;
   ns=ExpDstrib->GetInteger(ns, ns*1.2);//??????
   micros=(double)ns/1000.0;
-  std::cout<<"micros:"<<micros<<endl;
   #endif
   
   Time tNext(MicroSeconds(micros));
@@ -641,24 +643,29 @@ void DrlRouting::update()
 {
   upNum++;
   double time=Simulator::Now().GetSeconds();
-  if(printEnable2) std::cout<<"\n\nupdate(), time:"<<time<<std::endl;
+  NS_LOG_INFO(std::endl<<"update(), time:"<<time);
   vector<vector<double>> spDels;
   vector<vector<double>> spThrs;
+  vector<vector<uint32_t>> spECNpktNums;
   vector<vector<int>> spPacNos;
   for(int i=0; i<sessionNum; i++){
     int pathNum=sPaths[i].size();
     vector<double> dels;
     vector<double> thrs;
+    vector<uint32_t> ECNpktNums;
     vector<int> pacNos;
     for(int j=0; j<pathNum; j++){
       double del=0.0;
       double thr=0.0;
+      uint32_t ECNpktNum = 0;
       int pacNo=endsSocks[i][j]->dels.size();
       for(int k=0; k<pacNo; k++){
         double del_=endsSocks[i][j]->dels[k];
         if(del_<=0) {pacNo--; continue;}
         del+=del_;
         thr+=endsSocks[i][j]->thrs[k];
+        if (endsSocks[i][j]->qSizes[k] > ECNqThr)
+          ECNpktNum++;
       }
       if(pacNo>0) del=del/(double)pacNo;
       thr=thr/upTime*1000*8;//KB->bps
@@ -666,22 +673,25 @@ void DrlRouting::update()
       pacNos.push_back(pacNo);
       dels.push_back(del);
       thrs.push_back(thr);
-      if(printEnable2) cout<<"session:"<<i<<", path:"<<j<<", pacNo:"<<pacNo<<", thr:"<<thr<<", del:"<<del<<endl;
+      ECNpktNums.push_back(ECNpktNum);
+      NS_LOG_FUNCTION("session:"<<i<<", path:"<<j<<", pacNo:"<<pacNo<<", thr:"<<thr<<", del:"<<del << ", ECNpktNum:" << ECNpktNum);
       endsSocks[i][j]->thrs.clear();
       endsSocks[i][j]->dels.clear();
+      endsSocks[i][j]->qSizes.clear();
     }
     spDels.push_back(dels);
     spThrs.push_back(thrs);
+    spECNpktNums.push_back(ECNpktNums);
     spPacNos.push_back(pacNos);
   }
 
-  saveToFile(spPacNos, spDels, spThrs);
-  update(spPacNos, spDels, spThrs);
+  saveToFile(spPacNos, spDels, spThrs, spECNpktNums);
+  update(spPacNos, spDels, spThrs, spECNpktNums);
   //randRatio();
 //  if(upNum%20==0) updateWindow();
 }
 
-void DrlRouting::update(vector<vector<int>> pacNos, vector<vector<double>> dels, vector<vector<double>> thrs)
+void DrlRouting::update(vector<vector<int>> pacNos, vector<vector<double>> dels, vector<vector<double>> thrs, vector<vector<uint32_t>> ECNpkts)
 {
   ;
   #if 0
@@ -728,16 +738,16 @@ void DrlRouting::update(vector<vector<int>> pacNos, vector<vector<double>> dels,
   }
   else{
     PyErr_Print();
-    cout<<"Error, C++ call Python failed !!!"<<endl;
+    NS_LOG_ERROR("Error, C++ call Python failed !!!");
   }
   #endif
 }
 
-void DrlRouting::saveToFile(vector<vector<int>> pacNos, vector<vector<double>> dels, vector<vector<double>> thrs)
+void DrlRouting::saveToFile(vector<vector<int>> pacNos, vector<vector<double>> dels, vector<vector<double>> thrs, vector<vector<uint32_t>> ECNpkts)
 {
   double time=Simulator::Now().GetSeconds();
   
-  if(printEnable2) std::cout<<"saveToFile()"<<std::endl;
+  NS_LOG_FUNCTION("saveToFile()");
 
   vector<double> sesthr;
   vector<double> sesdel;
@@ -746,11 +756,13 @@ void DrlRouting::saveToFile(vector<vector<int>> pacNos, vector<vector<double>> d
   for(int i=0; i<sn; i++){//sn:session No.
     int pn=sRatios[i].size();
     vector <double>::iterator Iter1;
-    double thrSum=accumulate(thrs[i].begin(), thrs[i].end(), 0.0);
+    double thrSum=accumulate(thrs[i].begin(), thrs[i].end(), 0.0);//set 0.0, then double, else int
     int pacNoSum=accumulate(pacNos[i].begin(), pacNos[i].end(), 0);
+    int ECNpktSum = accumulate(ECNpkts[i].begin(), ECNpkts[i].end(), 0);
     double delAve=0;
+    double ECNratio = (double)(ECNpktSum)/(double)(pacNoSum);
     if(pacNoSum>0) for(int j=0; j<pn; j++) delAve+=dels[i][j]*pacNos[i][j]/pacNoSum;
-    if(printEnable2) cout<<"session "<<i<<",thrSum:"<<thrSum<<", aveDel:"<<delAve<<endl;
+    NS_LOG_FUNCTION("session "<<i<<",thrSum:"<<thrSum<<"Mbps, aveDel:"<<delAve<<"s, ECNratio:"<<ECNratio);
     sesthr.push_back(thrSum);
     sesdel.push_back(delAve);
     if(thrSum>0 && delAve >0) seslog.push_back(log(thrSum)-log(delAve));
@@ -778,8 +790,9 @@ void UdpSend(Ptr<Socket> sock, Ptr<Packet> packet, int sess, int path)
 {
   myTag tag;
   tag.SetValue1(Simulator::Now().GetSeconds());
-  tag.SetValue2(sess);
-//  tag.SetValue3(path);
+  tag.SetValue2((uint16_t)sess);
+  tag.SetValue3(0);
+  
   packet->AddPacketTag(tag); 
   sock->Send(packet);
 }
@@ -790,17 +803,18 @@ void recvCallback(Ptr<Socket> socket)
   myTag tag;
   packet->PeekPacketTag(tag);
   double sendTime=tag.GetValue1();
-  double iSession=tag.GetValue2();
-//  double iPath=tag.GetValue3();
+  uint16_t iSession=tag.GetValue2();
+  uint16_t qSize = tag.GetValue3();
   double recvTime=Simulator::Now().GetSeconds();
   double pacSize=packet->GetSize();
   socket->thrs.push_back(pacSize);
   socket->dels.push_back(recvTime-sendTime);
+  socket->qSizes.push_back(qSize);
   Address sendaddr;
   Address recvaddr;
   socket->GetPeerName(sendaddr);
   socket->GetSockName(recvaddr);
-  if(printEnable1) cout<<"recv callback, time:"<<recvTime<<", sendtime:"<<sendTime<<",packetsize:"<<pacSize<<", sender session:"<<iSession<<endl;
+  NS_LOG_LOGIC("recv callback, time:"<<recvTime<<", sendtime:"<<sendTime<<",packetsize:"<<pacSize<<", sender session:"<<iSession<<"qSize:"<<qSize);
 }
 
 
@@ -808,6 +822,10 @@ void recvCallback(Ptr<Socket> socket)
 void DrlRouting::setErrp(double err)
 {
   err_p=err;
+}
+void DrlRouting::setECNqThr(uint16_t thr)
+{
+  ECNqThr=thr;
 }
 void DrlRouting::setInputPath(string path)
 {
@@ -865,61 +883,4 @@ void DrlRouting::randRatio()
   }
 }
 
-/*my tag*/
-TypeId myTag::GetTypeId(void)
-{
-  static TypeId tid=TypeId("ns3::myTag")
-	.SetParent<Tag>()
-	.AddConstructor<myTag>();
-  return tid;
-}
 
-TypeId myTag::GetInstanceTypeId(void) const
-{
-  return GetTypeId();
-}
-
-uint32_t myTag::GetSerializedSize(void) const 
-{
-  return 16;
-}
-
-void myTag::Serialize(TagBuffer i) const 
-{
-  i.WriteDouble(tagValue1);
-  i.WriteDouble(tagValue2);
-  //i.WriteDouble(tagValue3);
-}
-
-void myTag::Deserialize(TagBuffer i) 
-{
-  tagValue1=i.ReadDouble();
-  tagValue2=i.ReadDouble();
-  //tagValue3=i.ReadDouble();
-}
-
-void myTag::Print(std::ostream &os) const 
-{
-//  os<<"tagvalue1="<<tagValue1<<", tagvalue2="<<tagValue2<<", tagValue3="<<tagValue3<<endl;
-	os<<"tagvalue1="<<tagValue1<<", tagvalue2="<<tagValue2<<endl;
-}
-
-void myTag::SetValue1(double value) 
-{
-  tagValue1=value;
-}
-
-double myTag::GetValue1() 
-{
-  return tagValue1;
-}
-
-void myTag::SetValue2(double value)
-{
-  tagValue2=value;
-}
-
-double myTag::GetValue2()
-{
-  return tagValue2;
-}
