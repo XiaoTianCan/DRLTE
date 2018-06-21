@@ -1,14 +1,8 @@
 /*
 Simulation environment for DRL-TE
-V1.3
-Time:2018/6/19
-Changes:
-1. add ECN
-1.1 remove class myTag to ipv4-static-routing.h/.c
-1.2 add tagValue3 to carry the maximum qsize along the path
-1.3 get the value in env.cc
-1.4 store it in endsocket for the use of update()
-2. standard the LOGs
+V1.4
+Time:2018/6/20
+LOG standard:
 NS_LOG_ERROR — error
 NS_LOG_WARN — warning
 NS_LOG_DEBUG — not common information
@@ -16,6 +10,11 @@ NS_LOG_INFO — usual information, set this level when simulation
 NS_LOG_FUNCTION — print function calling information and session related information
 NS_LOG_LOGIC – print topology construction information and packet related information
 NS_LOG_ALL — all the information in sub-functions, no related function to LOG
+Changes:
+1. add communication between c++ and python
+1.1 delete c++ call python3
+1.2 add socket, c++ is server, python is client
+1.3 add some tool functions, e.g. intToString()
 */
 #include <stdio.h>
 #include <stdlib.h>
@@ -25,8 +24,10 @@ NS_LOG_ALL — all the information in sub-functions, no related function to LOG
 #include <cassert>
 #include <numeric>
 #include <math.h>
-//#include <python3.5/Python.h>
-#include <python2.7/Python.h>
+#include <sys/types.h>
+#include <sys/socket.h>
+#include <arpa/inet.h>
+//#include <python3.5m/Python.h>
 #include "ns3/socket-factory.h"
 #include "ns3/tcp-socket-factory.h"
 #include "ns3/simulator.h"
@@ -59,7 +60,7 @@ NS_LOG_COMPONENT_DEFINE ("DrlEnv");
 typedef pair<int, int> Edge;
 bool printEnable0;//init related
 bool printEnable1;//packet related
-bool printEnable2;//result related
+bool enableFlag;//result related
 fstream outputFile;//output plot data
 
 class DrlRouting
@@ -77,12 +78,13 @@ public:
   void initAddrs();
   void initStaticRoute();
   void initSocket();
+  void initPyConnect(); 
   
   void begin();
   void randSendData(int iSession, uint8_t *data);
   void update();
-  void update(vector<vector<int>> pacNos, vector<vector<double>> dels, vector<vector<double>> thrs, vector<vector<uint32_t>> ECNpkts);
-  void saveToFile(vector<vector<int>> pacNos, vector<vector<double>> dels, vector<vector<double>> thrs, vector<vector<uint32_t>> ECNpkts);
+  void update(vector<vector<int>> pacNos, vector<vector<double>> dels, vector<vector<double>> thrs, vector<vector<int>> ECNpkts);
+  void saveToFile(vector<vector<int>> pacNos, vector<vector<double>> dels, vector<vector<double>> thrs, vector<vector<int>> ECNpkts);
 
   void setSendRate(vector<string> rates);
   void setCap(string rate);
@@ -119,12 +121,8 @@ private:
   double lastSec;
   double upTime;
   uint8_t *data;
-
-  #if 0
-  PyObject *pName;
-  PyObject *pModule;
-  PyObject *pFunc;
-  #endif
+  int server_fd;
+  int client_fd;
 
   DataRate cap;
   string linkDelay;
@@ -156,6 +154,9 @@ double getRand();
 int getRand(vector<double> ratio);
 int indexOf(vector<Edge> container, Edge value);
 string doubleToString(double d);
+double stringToDouble(string str);
+string intToString(int d);
+int stringToInt(string str);
 void UdpSend(Ptr<Socket> sock, Ptr<Packet> packet, int sess, int path);
 void recvCallback(Ptr<Socket> socket);
 
@@ -172,11 +173,11 @@ int main(int argc, char *argv[])
   #else //for packet-level debug
   LogComponentEnableAll (LOG_PREFIX_TIME);
   LogComponentEnable ("DrlEnv", LOG_LEVEL_LOGIC);
+  
   #endif
   
   string inputPath("./scratch/DRLTE/input.txt");
   string outputPath("./scratch/DRLTE/output.txt");
-  string envPath("/home/gn/geng/drl_te/agent/");//python environment?????
 
   int upTime=500;//ms
   int stopTime=6;//s
@@ -187,7 +188,7 @@ int main(int argc, char *argv[])
   
   printEnable0=false;
   printEnable1=false;
-  printEnable2=true;
+  enableFlag=true;//for socket now
 
   CommandLine cmd;
   cmd.AddValue ("inputpath", "the path of file containing path information", inputPath);
@@ -202,7 +203,6 @@ int main(int argc, char *argv[])
   Config::SetDefault ("ns3::Queue::Mode", StringValue ("QUEUE_MODE_PACKETS"));
   Config::SetDefault ("ns3::Queue::MaxPackets", UintegerValue(1000));
   Config::SetDefault("ns3::UdpSocket::RcvBufSize", UintegerValue(100000000));
-  //setenv("PYTHONPATH" , ("$PYTHONPATH:"+envPath).c_str(), 1);//1 means overwrite
 
   SeedManager::SetSeed(seed);
   SeedManager::SetRun(seed);
@@ -245,20 +245,14 @@ DrlRouting::DrlRouting()
   lastSec=0;
   upTime=500;//interval between two adjacent updates, i.e. schedulings
   data=new uint8_t[4000];//new a data block
-
-  #if 0
-  Py_Initialize();
-  pName=PyUnicode_DecodeFSDefault("sim-ddpg");
-  pModule = PyImport_ImportModule(pName);
-  Py_DECREF(pName);//quote counter
-  const char * tmp = "step";
-  pFunc = PyObject_GetAttrString(pModule, tmp);
-  #endif
+  server_fd = -1;
+  client_fd = -1;
 }
 
 DrlRouting::~DrlRouting()
 {
   if(outputFile) outputFile.close();
+  close(server_fd);
   delete []data;
   data = NULL;
   NS_LOG_INFO(std::endl<<"Simulation is end!");
@@ -342,6 +336,29 @@ string doubleToString(double d)
   if(os<<d) return os.str();
   return "Error";
 }
+
+double stringToDouble(string str)
+{
+  std::istringstream is(str);
+  double d; 
+  if(is>>d) return d;
+  return -9999999.99999;
+}
+
+string intToString(int d)
+{
+  std::ostringstream os;
+  if(os<<d) return os.str();
+  return "Error";
+}
+
+int stringToInt(string str)
+{
+  std::istringstream is(str);
+  int d;
+  if(is>>d) return d;
+  return -9999999;
+}
 //*********************************************************************
 /*initialization functions:*/
 void DrlRouting::init()
@@ -350,9 +367,9 @@ void DrlRouting::init()
   initNodes();
   initPaths();
   initAddrs();
-  //initRoute();
   initStaticRoute();
   initSocket();
+  initPyConnect(); 
 }
 void DrlRouting::addPathsFromFile()
 {
@@ -576,6 +593,50 @@ void DrlRouting::initSocket()
   }
   return;
 }
+void DrlRouting::initPyConnect()
+{
+  //server_fd client_fd
+  int server_port = 54321;
+  int lisNum = 1;
+  socklen_t len;
+  struct sockaddr_in my_addr, their_addr; 
+
+  if ((server_fd = socket(PF_INET, SOCK_STREAM, 0)) == -1) {
+    NS_LOG_ERROR("Create socket failed!");  
+    exit(1);  
+  }else  
+    NS_LOG_INFO("Socket created");  
+
+  bzero(&my_addr, sizeof(my_addr));
+  my_addr.sin_family = PF_INET;    //IPv4  
+  my_addr.sin_port = htons(server_port);
+  my_addr.sin_addr.s_addr = INADDR_ANY;
+
+  if (bind(server_fd, (struct sockaddr *) &my_addr, sizeof(struct sockaddr)) == -1){
+    NS_LOG_ERROR("Bind error!");  
+    exit(1);  
+  } else  
+    NS_LOG_INFO("Binded");  
+
+  if (listen(server_fd, lisNum) == -1) {  
+    NS_LOG_ERROR("Listen error!");  
+    exit(1);  
+  } else  
+    NS_LOG_INFO("Begin listening");
+  
+  
+  len = sizeof(struct sockaddr); 
+  //return;
+  while (enableFlag) {
+	if ((client_fd = accept(server_fd, (struct sockaddr *) &their_addr, &len)) == -1) {  
+	    NS_LOG_ERROR("Accept error!");
+	    exit(1);  
+	}else {
+		NS_LOG_INFO("drl connected");
+		break;
+  	}
+  }//while end
+}
 //********************************************************
 /*scheduling functions*/
 void DrlRouting::begin()
@@ -646,18 +707,18 @@ void DrlRouting::update()
   NS_LOG_INFO(std::endl<<"update(), time:"<<time);
   vector<vector<double>> spDels;
   vector<vector<double>> spThrs;
-  vector<vector<uint32_t>> spECNpktNums;
+  vector<vector<int>> spECNpktNums;
   vector<vector<int>> spPacNos;
   for(int i=0; i<sessionNum; i++){
     int pathNum=sPaths[i].size();
     vector<double> dels;
     vector<double> thrs;
-    vector<uint32_t> ECNpktNums;
+    vector<int> ECNpktNums;
     vector<int> pacNos;
     for(int j=0; j<pathNum; j++){
       double del=0.0;
       double thr=0.0;
-      uint32_t ECNpktNum = 0;
+      int ECNpktNum = 0;
       int pacNo=endsSocks[i][j]->dels.size();
       for(int k=0; k<pacNo; k++){
         double del_=endsSocks[i][j]->dels[k];
@@ -691,59 +752,155 @@ void DrlRouting::update()
 //  if(upNum%20==0) updateWindow();
 }
 
-void DrlRouting::update(vector<vector<int>> pacNos, vector<vector<double>> dels, vector<vector<double>> thrs, vector<vector<uint32_t>> ECNpkts)
+void DrlRouting::update(vector<vector<int>> pacNos, vector<vector<double>> dels, vector<vector<double>> thrs, vector<vector<int>> ECNpkts)
 {
-  ;
-  #if 0
-  PyObject *pArgs, *pArg, *pRto, *pThr, *pDel, *pRet;
-  int len=sRatios.size();
-  pRto=PyTuple_New(len);
-  for(int i=0; i<len; i++){
-    int ilen=sRatios[i].size();
-    PyObject *temp=PyTuple_New(ilen);
-    for(int j=0; j<ilen; j++) PyTuple_SetItem(temp, j, PyFloat_FromDouble(sRatios[i][j]));
-    PyTuple_SetItem(pRto, i, temp);
-  }
-  len=sessionNum;
-  pThr=PyTuple_New(len);
-  for(int i=0; i<len; i++){
-    int thrSum=0;
-    for(double thr: thrs[i]) thrSum+=thr;
-    PyTuple_SetItem(pThr, i, PyFloat_FromDouble(thrSum));
-  }
-  pDel=PyTuple_New(len);
-  for(int i=0; i<len; i++){
-    double aveDel=0;
-    int pathNum=dels[i].size();
-    int pacSum=accumulate(pacNos[i].begin(), pacNos[i].end(), 0);
-    for(int j=0; j<pathNum; j++) aveDel+=dels[i][j]*pacNos[i][j]/pacSum;
-    PyTuple_SetItem(pDel, i, PyFloat_FromDouble(aveDel));
-  }
-  pArgs=PyTuple_New(3);
-  PyTuple_SetItem(pArgs, 0, pRto); PyTuple_SetItem(pArgs, 1, pThr); PyTuple_SetItem(pArgs, 2, pDel);
-  pArg=PyTuple_New(1);
-  PyTuple_SetItem(pArg, 0, pArgs);
-  pRet=PyObject_CallObject(pFunc, pArg);
-  if(pRet!=NULL){
-    Py_DECREF(pRet);
-    int len=PyTuple_Size(pRet);
-    if(len==pathNum){
-      int pos=0;
-      for(int i=0;i<sessionNum;i++)
-        for(unsigned int j=0; j<sRatios[i].size(); j++) 
-          sRatios[i][j]=PyFloat_AsDouble(PyTuple_GetItem(pRet, pos++));
-      if(printEnable2) printf("C++ call python succeeded.\n\n");
+  //if (Simulator::Now().GetSeconds() < 6.4 || Simulator::Now().GetSeconds() > 7.1) return;
+  if (!enableFlag) return;
+  NS_LOG_FUNCTION("communicate with drl server");
+  /*construct Msg buffer*/
+  int BUFSIZE = 20000;
+  char buf[BUFSIZE];
+  memset(buf, 0, BUFSIZE);
+  int bufpos = 0;
+  string msg = "";
+  int sn = sessionNum;
+  for (int i = 0; i < sn; i++) {
+    msg = "";
+    int pn = pacNos[i].size();
+    for (int j = 0; j < pn; j++) {
+      msg += intToString(pacNos[i][j]) + " ";
     }
-    else printf("Python return parameters are invalid. %d, %d.\n\n", len, pathNum);
+    if (i < sn -1) {
+      msg += ",";
+      memcpy(buf + bufpos, msg.c_str(), msg.length());
+      bufpos += msg.length();
+    }
   }
-  else{
-    PyErr_Print();
-    NS_LOG_ERROR("Error, C++ call Python failed !!!");
+  msg += ";";
+  memcpy(buf + bufpos, msg.c_str(), msg.length());
+  bufpos += msg.length();
+  for (int i = 0; i < sn; i++) {
+    msg = "";
+    int pn = dels[i].size();
+    for (int j = 0; j < pn; j++) {
+      msg += doubleToString(dels[i][j]) + " ";
+    }
+    if (i < sn -1) {
+      msg += ",";
+      memcpy(buf + bufpos, msg.c_str(), msg.length());
+      bufpos += msg.length();
+    }
   }
+  msg += ";";
+  memcpy(buf + bufpos, msg.c_str(), msg.length());
+  bufpos += msg.length();
+  for (int i = 0; i < sn; i++) {
+    msg = "";
+    int pn = thrs[i].size();
+    for (int j = 0; j < pn; j++) {
+      msg += doubleToString(thrs[i][j]) + " ";
+    }
+    if (i < sn -1) {
+      msg += ",";
+      memcpy(buf + bufpos, msg.c_str(), msg.length());
+      bufpos += msg.length();
+    }
+  }
+  msg += ";";
+  memcpy(buf + bufpos, msg.c_str(), msg.length());
+  bufpos += msg.length();
+  for (int i = 0; i < sn; i++) {
+    msg = "";
+    int pn = ECNpkts[i].size();
+    for (int j = 0; j < pn; j++) {
+      msg += intToString(ECNpkts[i][j]) + " ";
+    }
+    if (i < sn -1) {
+      msg += ",";
+      memcpy(buf + bufpos, msg.c_str(), msg.length());
+      bufpos += msg.length();
+    }
+  }
+  memcpy(buf + bufpos, msg.c_str(), msg.length());
+  bufpos += msg.length();
+  
+  msg = "";
+  msg = intToString(bufpos) + ";";
+  char Msg[BUFSIZE];
+  memset(Msg, 0, BUFSIZE);
+  memcpy(Msg, msg.c_str(), msg.length());
+  memcpy(Msg + msg.length(), buf, bufpos);
+  bufpos += msg.length();
+  //cout << endl << bufpos << endl << Msg << endl;
+  /*construct Msg buffer end*/
+  
+  
+  /**************************/
+  /*send Msg to drl server*/
+  int msgLen = 0;
+  int blockSize = 1024;//1024;
+  int blockNum = (int)((blockSize - 1 + bufpos)/blockSize);
+  for (int i = 0; i < blockNum; i++) {
+    char sendbuf[blockSize] = {0};
+    if (i < blockNum -1)
+      memcpy(sendbuf, Msg + i*blockSize, blockSize);
+    else memcpy(sendbuf, Msg + i*blockSize, bufpos-blockSize*i);
+    msgLen = send(client_fd, sendbuf, blockSize, 0);
+    //cout << "msgLen:" << msgLen << endl;
+  }
+  /**************************/
+  /*recv data from drl server*/
+  char recvbuf[blockSize];
+  unsigned int msgTotalLen = 0;
+  unsigned int msgRecvLen = 0;
+  unsigned int msgContLen = 0;
+  memset(Msg, 0, BUFSIZE);
+  bzero(Msg, BUFSIZE);
+  while (1) {
+  	msgLen = recv(client_fd, recvbuf, blockSize, 0);
+    if (msgLen > 0){
+	  //printf("msgrecv:%s\n", recvbuf);
+      if(msgTotalLen == 0) {
+        string strTmp = recvbuf;
+        int posTmp = strTmp.find_first_of(';', 0);
+        msgContLen = atoi(strTmp.substr(0, posTmp).c_str());
+        msgTotalLen= msgContLen + (strTmp.substr(0, posTmp)).length() + 1;//1 is the length of ';'
+        cout << msgTotalLen << "  sdsssss " << msgContLen << endl;
+      }
+      memcpy(Msg+msgRecvLen, recvbuf, sizeof(recvbuf));
+      msgRecvLen += sizeof(recvbuf);
+      if (msgRecvLen < msgTotalLen)
+        continue;
+      NS_LOG_FUNCTION(Msg);
+      break;
+    }
+  }
+  /**************************/
+  /*parse data and change session ratios: sRatios*/
+  string strMsg(Msg);
+  unsigned int start = strMsg.find_first_of(';', 0) + 1;
+  unsigned int end = 0;
+  string subStrMsg = strMsg.substr(start, msgContLen);
+  start = 0;
+  cout << "strMsg:" << strMsg << endl;
+  cout << "subStrMsg:" << subStrMsg << endl;
+  vector<double> ratios;
+  do {
+    end = subStrMsg.find_first_of(',', start);
+    string tmp = subStrMsg.substr(start, end-start);
+    ratios.push_back(stringToDouble(tmp));
+    start = end+1;
+  }while(end < subStrMsg.size());
+  
+  #if 1
+  int k = 0;
+  for(int i = 0;i < sessionNum; i++)
+    for(unsigned int j=0; j < sRatios[i].size(); j++) 
+      sRatios[i][j] = ratios[k++];
   #endif
 }
 
-void DrlRouting::saveToFile(vector<vector<int>> pacNos, vector<vector<double>> dels, vector<vector<double>> thrs, vector<vector<uint32_t>> ECNpkts)
+void DrlRouting::saveToFile(vector<vector<int>> pacNos, vector<vector<double>> dels, vector<vector<double>> thrs, vector<vector<int>> ECNpkts)
 {
   double time=Simulator::Now().GetSeconds();
   
