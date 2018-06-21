@@ -14,7 +14,7 @@ Changes:
 1. add communication between c++ and python
 1.1 delete c++ call python3
 1.2 add socket, c++ is server, python is client
-1.3 add some tool functions, e.g. intToString()
+1.3 tool functions
 */
 #include <stdio.h>
 #include <stdlib.h>
@@ -166,40 +166,32 @@ int main(int argc, char *argv[])
 {
   #if 1 //for simulation
   LogComponentEnable ("DrlEnv", LOG_LEVEL_INFO);
-  #elif 0 //for logic debug
+  #elif false //for logic debug
   LogComponentEnableAll (LOG_PREFIX_TIME);//print time before each log information
   LogComponentEnable ("DrlEnv", LOG_LEVEL_FUNCTION);
   LogComponentEnable ("Ipv4StaticRouting", LOG_LEVEL_ERROR);
   #else //for packet-level debug
   LogComponentEnableAll (LOG_PREFIX_TIME);
   LogComponentEnable ("DrlEnv", LOG_LEVEL_LOGIC);
-  
   #endif
   
   string inputPath("./scratch/DRLTE/input.txt");
   string outputPath("./scratch/DRLTE/output.txt");
-
   int upTime=500;//ms
   int stopTime=6;//s
   int packetSize=1024;
   double err_p=0.0;//?????0
   uint16_t ECNqThr=200;
-  uint32_t seed=1;//hear is OK??
-  
+  uint32_t seed=1;
   printEnable0=false;
   printEnable1=false;
-  enableFlag=true;//for socket now
+  enableFlag=false;//for socket now
 
   CommandLine cmd;
-  cmd.AddValue ("inputpath", "the path of file containing path information", inputPath);
-  cmd.AddValue ("outputpath", "the file contains the lab result", outputPath);
-  cmd.AddValue ("envpath", "the path of $PYTHONPATH", envPath);
   cmd.AddValue ("uptime", "update interval time", upTime);
   cmd.AddValue ("stoptime", "stop time, seconds", stopTime);
   cmd.AddValue ("packetsize", "KB", packetSize);
-  cmd.AddValue ("seed", "random seed", seed);
   cmd.Parse(argc, argv);
-
   Config::SetDefault ("ns3::Queue::Mode", StringValue ("QUEUE_MODE_PACKETS"));
   Config::SetDefault ("ns3::Queue::MaxPackets", UintegerValue(1000));
   Config::SetDefault("ns3::UdpSocket::RcvBufSize", UintegerValue(100000000));
