@@ -36,9 +36,10 @@ if __name__ == "__main__":
                 continue
             print(msg)
             print(len(msg))
-            msg = "1234567890asgfasgagagdagahafhfdahsdddddaaa"
-            msg = str(len(msg)) + ';' + msg;
-            msgTotalLen = len(msg)
+            time.sleep(5) 
+            #msg = "1234567890asgfasgagagdagahafhfdahsdddddaaa"
+            #msg = str(len(msg)) + ';' + msg;
+            #msgTotalLen = len(msg)
             #print(msgTotalLen)
             blockNum = int((msgTotalLen+blockSize-1)/blockSize);
             for i in range(blockNum):

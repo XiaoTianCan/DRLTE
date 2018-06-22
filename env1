@@ -1,7 +1,7 @@
 /*
 Simulation environment for DRL-TE
-V1.4
-Time:2018/6/20
+V1.5
+Time:2018/6/21
 LOG standard:
 NS_LOG_ERROR — error
 NS_LOG_WARN — warning
@@ -11,10 +11,7 @@ NS_LOG_FUNCTION — print function calling information and session related infor
 NS_LOG_LOGIC – print topology construction information and packet related information
 NS_LOG_ALL — all the information in sub-functions, no related function to LOG
 Changes:
-1. add communication between c++ and python
-1.1 delete c++ call python3
-1.2 add socket, c++ is server, python is client
-1.3 tool functions
+1. test time record, running time of python makes no sense. 
 */
 #include <stdio.h>
 #include <stdlib.h>
@@ -175,7 +172,7 @@ int main(int argc, char *argv[])
   LogComponentEnable ("DrlEnv", LOG_LEVEL_LOGIC);
   #endif
   
-  string inputPath("./scratch/DRLTE/input.txt");
+  string inputPath("./scratch/DRLTE/1221SHR.txt");//input
   string outputPath("./scratch/DRLTE/output.txt");
   int upTime=500;//ms
   int stopTime=6;//s
@@ -185,7 +182,7 @@ int main(int argc, char *argv[])
   uint32_t seed=1;
   printEnable0=false;
   printEnable1=false;
-  enableFlag=false;//for socket now
+  enableFlag=true;//for socket now
 
   CommandLine cmd;
   cmd.AddValue ("uptime", "update interval time", upTime);
@@ -747,8 +744,9 @@ void DrlRouting::update()
 void DrlRouting::update(vector<vector<int>> pacNos, vector<vector<double>> dels, vector<vector<double>> thrs, vector<vector<int>> ECNpkts)
 {
   //if (Simulator::Now().GetSeconds() < 6.4 || Simulator::Now().GetSeconds() > 7.1) return;
-  if (!enableFlag) return;
+  //if (!enableFlag) return;
   NS_LOG_FUNCTION("communicate with drl server");
+  cout << "update2 time:" << Simulator::Now().GetSeconds() << endl;
   /*construct Msg buffer*/
   int BUFSIZE = 20000;
   char buf[BUFSIZE];
@@ -823,10 +821,10 @@ void DrlRouting::update(vector<vector<int>> pacNos, vector<vector<double>> dels,
   memcpy(Msg, msg.c_str(), msg.length());
   memcpy(Msg + msg.length(), buf, bufpos);
   bufpos += msg.length();
-  //cout << endl << bufpos << endl << Msg << endl;
+  cout << endl << bufpos << endl;// << Msg << endl;
   /*construct Msg buffer end*/
   
-  
+  //return;
   /**************************/
   /*send Msg to drl server*/
   int msgLen = 0;
@@ -840,6 +838,7 @@ void DrlRouting::update(vector<vector<int>> pacNos, vector<vector<double>> dels,
     msgLen = send(client_fd, sendbuf, blockSize, 0);
     //cout << "msgLen:" << msgLen << endl;
   }
+  
   /**************************/
   /*recv data from drl server*/
   char recvbuf[blockSize];
@@ -857,7 +856,7 @@ void DrlRouting::update(vector<vector<int>> pacNos, vector<vector<double>> dels,
         int posTmp = strTmp.find_first_of(';', 0);
         msgContLen = atoi(strTmp.substr(0, posTmp).c_str());
         msgTotalLen= msgContLen + (strTmp.substr(0, posTmp)).length() + 1;//1 is the length of ';'
-        cout << msgTotalLen << "  sdsssss " << msgContLen << endl;
+        //cout << msgTotalLen << "  sdsssss " << msgContLen << endl;
       }
       memcpy(Msg+msgRecvLen, recvbuf, sizeof(recvbuf));
       msgRecvLen += sizeof(recvbuf);
@@ -875,7 +874,7 @@ void DrlRouting::update(vector<vector<int>> pacNos, vector<vector<double>> dels,
   string subStrMsg = strMsg.substr(start, msgContLen);
   start = 0;
   cout << "strMsg:" << strMsg << endl;
-  cout << "subStrMsg:" << subStrMsg << endl;
+  //cout << "subStrMsg:" << subStrMsg << endl;
   vector<double> ratios;
   do {
     end = subStrMsg.find_first_of(',', start);
@@ -883,8 +882,8 @@ void DrlRouting::update(vector<vector<int>> pacNos, vector<vector<double>> dels,
     ratios.push_back(stringToDouble(tmp));
     start = end+1;
   }while(end < subStrMsg.size());
-  
-  #if 1
+  cout << "update2 time22:" << Simulator::Now().GetSeconds() << endl;
+  #if 0
   int k = 0;
   for(int i = 0;i < sessionNum; i++)
     for(unsigned int j=0; j < sRatios[i].size(); j++) 
