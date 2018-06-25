@@ -4,13 +4,16 @@ from os.path import join as pjoin
 
 
 def home_out(path):
-    full_path = pjoin(os.environ['HOME'], 'Data', 'drl_te', path)
+    full_path = pjoin('/home', 'netlab', 'gengnan', 'drl_te', path)
+    #print(full_path)
     if not os.path.exists(full_path):
         os.mkdir(full_path)
     return full_path
 
 flags = tf.app.flags
 FLAGS = flags.FLAGS
+
+flags.DEFINE_integer('server_port', '50001', 'remote server port')
 
 flags.DEFINE_string('act_flag', 'drl', 'methods for explorer')
 flags.DEFINE_boolean('sim_flag', False, 'simulation flag')

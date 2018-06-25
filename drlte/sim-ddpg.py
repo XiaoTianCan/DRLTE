@@ -1,3 +1,4 @@
+from socket import*
 import datetime
 import os
 import sys
@@ -17,6 +18,8 @@ from SimEnv.Env import Env
 from flag import FLAGS
 
 TIME_STAMP = str(datetime.datetime.now())
+
+SERVER_PORT = getattr(FLAGS, 'server_port')
 
 SIM_FLAG = getattr(FLAGS, 'sim_flag')
 ACT_FLAG = getattr(FLAGS, 'act_flag')
@@ -54,7 +57,6 @@ DIR_MOD = getattr(FLAGS, 'dir_mod').format(TIME_STAMP)
 DIR_LOG = getattr(FLAGS, 'dir_log').format(TIME_STAMP)
 os.mkdir(DIR_LOG)
 
-
 class DrlAgent:
     def __init__(self, state_init, action_init):
         sess = tf.Session()
@@ -74,7 +76,7 @@ class DrlAgent:
         self.__summary.add_variable(name='ep-reward')
         self.__summary.add_variable(name='ep-max-q')
         self.__summary.build()
-        self.__summary.write_vars(FLAGS)
+        #self.__summary.write_vars(FLAGS)
 
         self.__explorer = Explorer(EP_BEGIN, EP_END, EP_ST, DIM_ACTION, NUM_PATHS, SEED)
 
@@ -223,7 +225,7 @@ if not SIM_FLAG:
     file_thr_out = open(DIR_LOG + '/thr.log', 'a', 1)
     file_del_out = open(DIR_LOG + '/del.log', 'a', 1)
 
-
+'''
 def split_arg(para):
     tmp = np.array(para)
     state = np.array(tmp[0]).flatten()
@@ -259,7 +261,61 @@ def split_arg(para):
     print(thr, file=file_thr_out)
     print(delay, file=file_del_out)
     return state_new, reward, np.sum(thr), np.mean(delay)
+'''
+def split_arg(para):
+    global DIM_STATE
+    global DIM_ACTION
+    global NUM_PATHS
 
+    paraList = para.split(';')
+    pacNosList = paraList[1].split(',')
+    delsList = paraList[2].split(',')
+    thrsList = paraList[3].split(',')
+    ECNpktsList = paraList[4].split(',')
+    sessionNum = len(pacNosList)
+    DIM_STATE = 2*sessionNum#dels thrs
+    pacNos = []
+    dels = []
+    thrs = []
+    ECNpkts = []
+    DIM_ACTION = 0
+    NUM_PATHS = []
+    #print(pacNosList)
+    #print(delsList)
+    #print(thrsList)
+    #print(ECNpktsList)
+
+    for i in range(sessionNum):
+        pacNos.append([])
+        dels.append([])
+        thrs.append([])
+        ECNpkts.append([])
+        pacNosItem = pacNosList[i].split(' ')
+        delsItem = delsList[i].split(' ')
+        thrsItem = thrsList[i].split(' ')
+        ECNpktsItem = ECNpktsList[i].split(' ')
+        pathNum = len(pacNosItem)
+        DIM_ACTION += pathNum
+        NUM_PATHS.append(pathNum)
+        for j in range(pathNum):
+            pacNos[i].append(int(pacNosItem[j]))
+            dels[i].append(float(delsItem[j])*1000)
+            thrs[i].append(float(thrsItem[j]))
+            ECNpkts[i].append(int(ECNpktsItem[j]))
+
+    thr = np.sum(np.array(thrs, dtype=np.float64), axis=1)
+    delay = np.sum(np.array(dels, dtype=np.float64), axis=1)
+
+    #print('thr', thr)
+    #print('dly', delay)
+
+    reward = np.sum(np.log(thr) - DELTA * np.log(delay))
+    # state_new = np.concatenate((thr, delay))
+    state_new = np.concatenate((np.log(thr), np.log(delay)))
+
+    print(thr, file=file_thr_out)
+    print(delay, file=file_del_out)
+    return state_new, reward, np.sum(thr), np.mean(delay)
 
 def step(tmp):
     global ret_c
@@ -281,6 +337,7 @@ def step(tmp):
     print(state, file=file_sta_out)
     print(reward, file=file_rwd_out)
     print(ret_c, file=file_act_out)
+
     return ret_c
 
 
@@ -297,3 +354,53 @@ def sim_ddpg():
             state = sn
             # print(state)
         #state = action = env.reset()
+
+
+if __name__ == "__main__":
+    print("drlte ----------------------")
+    
+    serverIP = '127.0.0.1'    # The remote ns3 server  
+    serverPort = SERVER_PORT        # The same port used by the server  
+    ns3Server = (serverIP, serverPort)
+    tcpSocket = socket(AF_INET, SOCK_STREAM)
+    tcpSocket.connect(ns3Server)
+
+    msgTotalLen = 0
+    msgRecvLen = 0
+    msg = ""
+    blockSize = 1024;
+    BUFSIZE = 1025
+    while True:
+        datarecv = tcpSocket.recv(BUFSIZE).decode()
+        if len(datarecv) > 0:
+            if msgTotalLen == 0:
+                totalLenStr = (datarecv.split(';'))[0]
+                msgTotalLen = int(totalLenStr) + len(totalLenStr) + 1#1 is the length of ';'
+                if msgTotalLen == 2:
+                    print("over!")
+                    break;
+            msgRecvLen += len(datarecv)
+            msg += datarecv
+            if msgRecvLen < msgTotalLen: 
+                continue
+            #print(msg)
+            ret_c = step(msg)
+            print("----serverPort:%d----" % serverPort)
+            #print(ret_c)
+
+            msg = ""
+            for i in range(len(ret_c)-1):
+                msg += str(round(ret_c[i], 3)) + ','
+            msg += str(round(ret_c[len(ret_c)-1], 3))
+            msg = str(len(msg)) + ';' + msg;
+            msgTotalLen = len(msg)
+            #print(msgTotalLen)
+            blockNum = int((msgTotalLen+blockSize-1)/blockSize);
+            for i in range(blockNum):
+                data = msg[i*blockSize:i*blockSize+blockSize]
+                tcpSocket.send(data.encode())
+                #print(data)
+            msgTotalLen = 0
+            msgRecvLen = 0
+            msg = ""
+    tcpSocket.close()
