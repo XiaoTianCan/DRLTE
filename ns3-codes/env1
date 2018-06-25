@@ -1,7 +1,7 @@
 /*
 Simulation environment for DRL-TE
-V2.0
-Time:2018/6/23
+V2.1
+Time:2018/6/25
 LOG standard:
 NS_LOG_ERROR - error
 NS_LOG_WARN - warning
@@ -11,8 +11,7 @@ NS_LOG_FUNCTION - print function calling information and session related informa
 NS_LOG_LOGIC - print topology construction information and packet related information
 NS_LOG_ALL - all the information in sub-functions, no related function to LOG
 Changes:
-1. add dos2unix
-2. finish the first test
+send session info to drlte
 */
 #include <stdio.h>
 #include <stdlib.h>
@@ -175,10 +174,10 @@ int main(int argc, char *argv[])
   LogComponentEnable ("DrlEnv", LOG_LEVEL_LOGIC);
   #endif
 
-  string fileName = "NSFSHR";//input//1221SHR//NSF_s20_SHR_p3//inputKite
+  string fileName = "inputKite";//input//1221SHR//NSF_s20_SHR_p3//inputKite
 
   int upTime=500;//ms
-  int stopTime=1005;//s
+  int stopTime=16;//s
   int packetSize=1024;
   int serverPort=50001;
   double err_p=0.0;//?????0
@@ -205,7 +204,7 @@ int main(int argc, char *argv[])
   string TXT = ".txt";
   string inputPath("./scratch/DRLTE/inputs/" + fileName + TXT);
   string outputPath("./scratch/DRLTE/outputs/" + fileName + TXT);
-  //system("dos2unix ./scratch/DRLTE/inputs/*.txt");
+  system("dos2unix ./scratch/DRLTE/inputs/*.txt");
 //----------------------------------------------------------------
   NS_LOG_INFO("DrlRouting init begin!");
   DrlRouting drl=DrlRouting();
@@ -633,6 +632,19 @@ void DrlRouting::initPyConnect()
     break;
     }
   }//while end
+  //send session info
+  string msg = "";
+  for(int i=0; i<sessionNum; i++) {
+    int pn = sPaths[i].size();
+    int src = sPaths[i][0][1];
+    msg += intToString(src) + ',' + intToString(pn);
+    if(i < sessionNum -1) msg += ',';
+  }
+  msg = intToString(msg.length()) + ';' + msg;
+  ///cout << "msg:" << msg << endl;
+  char sendbuf[2000];
+  memcpy(sendbuf, msg.c_str(), msg.length());
+  send(client_fd, sendbuf, msg.length(), 0);
 }
 //********************************************************
 /*scheduling functions*/
@@ -753,7 +765,7 @@ void DrlRouting::update(vector<vector<int>> pacNos, vector<vector<double>> dels,
 {
   if (!enableFlag) return;
   NS_LOG_FUNCTION("communicate with drl server");
-  if (Simulator::Now().GetSeconds() > stopTime - 0.1) {
+  if (Simulator::Now().GetSeconds() > stopTime - 0.5) {
       char sendbuf[1024] = "0;updatefinished";
       send(client_fd, sendbuf, 1024, 0);
       cout << "update finished!" << endl;

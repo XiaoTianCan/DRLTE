@@ -14,6 +14,7 @@ flags = tf.app.flags
 FLAGS = flags.FLAGS
 
 flags.DEFINE_integer('server_port', '50001', 'remote server port')
+flags.DEFINE_string('server_ip', '127.0.0.1', 'remote server ip address')
 
 flags.DEFINE_string('act_flag', 'drl', 'methods for explorer')
 flags.DEFINE_boolean('sim_flag', False, 'simulation flag')
