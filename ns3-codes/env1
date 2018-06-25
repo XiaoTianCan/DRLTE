@@ -1,17 +1,18 @@
 /*
 Simulation environment for DRL-TE
-V1.5
-Time:2018/6/21
+V2.0
+Time:2018/6/23
 LOG standard:
-NS_LOG_ERROR — error
-NS_LOG_WARN — warning
-NS_LOG_DEBUG — not common information
-NS_LOG_INFO — usual information, set this level when simulation
-NS_LOG_FUNCTION — print function calling information and session related information
-NS_LOG_LOGIC – print topology construction information and packet related information
-NS_LOG_ALL — all the information in sub-functions, no related function to LOG
+NS_LOG_ERROR - error
+NS_LOG_WARN - warning
+NS_LOG_DEBUG - not common information
+NS_LOG_INFO - usual information, set this level when simulation
+NS_LOG_FUNCTION - print function calling information and session related information
+NS_LOG_LOGIC - print topology construction information and packet related information
+NS_LOG_ALL - all the information in sub-functions, no related function to LOG
 Changes:
-1. test time record, running time of python makes no sense. 
+1. add dos2unix
+2. finish the first test
 */
 #include <stdio.h>
 #include <stdlib.h>
@@ -93,6 +94,7 @@ public:
   void setOutputPath(string path);
   void setErrp(double err);
   void setECNqThr(uint16_t thr);
+  void setServerPort(int port);
   void randRatio();
   void meanRatio();
   int spsToEdge(int sess, int path, int step);
@@ -111,6 +113,7 @@ private:
   string outputPath;
   int packetSize;
   int port;
+  int server_port;
   int nodeNum;
   int pathNum;
   int sessionNum;
@@ -161,33 +164,36 @@ void recvCallback(Ptr<Socket> socket);
 //-----< main function >-----
 int main(int argc, char *argv[])
 {
-  #if 1 //for simulation
+  #if 1                                                       //for simulation
   LogComponentEnable ("DrlEnv", LOG_LEVEL_INFO);
-  #elif false //for logic debug
-  LogComponentEnableAll (LOG_PREFIX_TIME);//print time before each log information
+  #elif false                                                 //for logic debug
+  LogComponentEnableAll (LOG_PREFIX_TIME);                    //print time before each log information
   LogComponentEnable ("DrlEnv", LOG_LEVEL_FUNCTION);
   LogComponentEnable ("Ipv4StaticRouting", LOG_LEVEL_ERROR);
-  #else //for packet-level debug
+  #else                                                       //for packet-level debug
   LogComponentEnableAll (LOG_PREFIX_TIME);
   LogComponentEnable ("DrlEnv", LOG_LEVEL_LOGIC);
   #endif
-  
-  string inputPath("./scratch/DRLTE/1221SHR.txt");//input
-  string outputPath("./scratch/DRLTE/output.txt");
+
+  string fileName = "NSFSHR";//input//1221SHR//NSF_s20_SHR_p3//inputKite
+
   int upTime=500;//ms
-  int stopTime=6;//s
+  int stopTime=1005;//s
   int packetSize=1024;
+  int serverPort=50001;
   double err_p=0.0;//?????0
   uint16_t ECNqThr=200;
   uint32_t seed=1;
-  printEnable0=false;
+  printEnable0=false;//debug now:remote server
   printEnable1=false;
   enableFlag=true;//for socket now
 
   CommandLine cmd;
+  cmd.AddValue ("filename", "input filename", fileName);
   cmd.AddValue ("uptime", "update interval time", upTime);
   cmd.AddValue ("stoptime", "stop time, seconds", stopTime);
   cmd.AddValue ("packetsize", "KB", packetSize);
+  cmd.AddValue ("serverport", "server port", serverPort);
   cmd.Parse(argc, argv);
   Config::SetDefault ("ns3::Queue::Mode", StringValue ("QUEUE_MODE_PACKETS"));
   Config::SetDefault ("ns3::Queue::MaxPackets", UintegerValue(1000));
@@ -196,9 +202,14 @@ int main(int argc, char *argv[])
   SeedManager::SetSeed(seed);
   SeedManager::SetRun(seed);
 
+  string TXT = ".txt";
+  string inputPath("./scratch/DRLTE/inputs/" + fileName + TXT);
+  string outputPath("./scratch/DRLTE/outputs/" + fileName + TXT);
+  //system("dos2unix ./scratch/DRLTE/inputs/*.txt");
 //----------------------------------------------------------------
   NS_LOG_INFO("DrlRouting init begin!");
   DrlRouting drl=DrlRouting();
+  drl.setServerPort(serverPort);
   drl.setErrp(err_p);
   drl.setECNqThr(ECNqThr);
   drl.setInputPath(inputPath);
@@ -226,6 +237,7 @@ DrlRouting::DrlRouting()
   outputPath="";//the filepath of the file for plot
   packetSize=1024;
   port=12345;
+  server_port=54321;
   nodeNum=0;
   pathNum=0;
   sessionNum=0;
@@ -375,11 +387,7 @@ void DrlRouting::addPathsFromFile()
   cap.append("Mbps");//link capacity
   while(!in.eof()){
     in.getline(buffer, 500);
-    if(strcmp(buffer, "succeed")==0) break;//"succeed" means the end of paths
-    if(strcmp(buffer, "fail")==0){
-      NS_LOG_ERROR("file information error!!!");
-      exit(1);
-    }
+    if(buffer[0] == 's') break;//"succeed" means the end of paths
     string str(buffer);
     vector<int> vec;
     unsigned int start=0;
@@ -399,11 +407,11 @@ void DrlRouting::addPathsFromFile()
   vector<string> v_sendRate;
   unsigned int start=0;
   unsigned int end=0;
-  while(end<str.size()){
+  do {
     end=str.find_first_of(',', start);
     v_sendRate.push_back(str.substr(start, end-start).append("Mbps"));
     start=end+1;
-  }
+  }while(end < str.size());
   setSendRate(v_sendRate);//set sendRates in DrlRouting
   setCap(cap);//set cap in DrlRouting
   for(unsigned int i=0; i<res.size(); i++){//init sPaths and sRatios
@@ -539,7 +547,7 @@ void DrlRouting::initStaticRoute()
         int itf=ipv4Node->GetInterfaceForAddress(addr);
         int itfNext=ipv4NodeNext->GetInterfaceForAddress(addrNext);
         NS_LOG_LOGIC("addrSrc:"<<addrSrc<<", end addr:"<<addrEnd<<", cur addr:"<<addr<<", next hop:"<<addrNext);
-        srNodes[nodei]->AddHostRouteTo(addrEnd, addrNext, itf);//paras:destination address;	next hop address; interface index; Metric of route in case of multiple routes to same destination
+        srNodes[nodei]->AddHostRouteTo(addrEnd, addrNext, itf);//paras:destination address; next hop address; interface index; Metric of route in case of multiple routes to same destination
         srNodes[nodeiNext]->AddHostRouteTo(addrSrc, addr, itfNext);
       }
     }
@@ -585,7 +593,7 @@ void DrlRouting::initSocket()
 void DrlRouting::initPyConnect()
 {
   //server_fd client_fd
-  int server_port = 54321;
+  int server_port = this->server_port;///54321;
   int lisNum = 1;
   socklen_t len;
   struct sockaddr_in my_addr, their_addr; 
@@ -617,13 +625,13 @@ void DrlRouting::initPyConnect()
   len = sizeof(struct sockaddr); 
   //return;
   while (enableFlag) {
-	if ((client_fd = accept(server_fd, (struct sockaddr *) &their_addr, &len)) == -1) {  
-	    NS_LOG_ERROR("Accept error!");
-	    exit(1);  
-	}else {
-		NS_LOG_INFO("drl connected");
-		break;
-  	}
+  if ((client_fd = accept(server_fd, (struct sockaddr *) &their_addr, &len)) == -1) {  
+      NS_LOG_ERROR("Accept error!");
+      exit(1);  
+  }else {
+    NS_LOG_INFO("drl connected");
+    break;
+    }
   }//while end
 }
 //********************************************************
@@ -743,10 +751,14 @@ void DrlRouting::update()
 
 void DrlRouting::update(vector<vector<int>> pacNos, vector<vector<double>> dels, vector<vector<double>> thrs, vector<vector<int>> ECNpkts)
 {
-  //if (Simulator::Now().GetSeconds() < 6.4 || Simulator::Now().GetSeconds() > 7.1) return;
-  //if (!enableFlag) return;
+  if (!enableFlag) return;
   NS_LOG_FUNCTION("communicate with drl server");
-  cout << "update2 time:" << Simulator::Now().GetSeconds() << endl;
+  if (Simulator::Now().GetSeconds() > stopTime - 0.1) {
+      char sendbuf[1024] = "0;updatefinished";
+      send(client_fd, sendbuf, 1024, 0);
+      cout << "update finished!" << endl;
+      return;
+  }
   /*construct Msg buffer*/
   int BUFSIZE = 20000;
   char buf[BUFSIZE];
@@ -757,9 +769,10 @@ void DrlRouting::update(vector<vector<int>> pacNos, vector<vector<double>> dels,
   for (int i = 0; i < sn; i++) {
     msg = "";
     int pn = pacNos[i].size();
-    for (int j = 0; j < pn; j++) {
+    for (int j = 0; j < pn-1; j++) {
       msg += intToString(pacNos[i][j]) + " ";
     }
+    msg += intToString(pacNos[i][pn-1]);
     if (i < sn -1) {
       msg += ",";
       memcpy(buf + bufpos, msg.c_str(), msg.length());
@@ -772,9 +785,10 @@ void DrlRouting::update(vector<vector<int>> pacNos, vector<vector<double>> dels,
   for (int i = 0; i < sn; i++) {
     msg = "";
     int pn = dels[i].size();
-    for (int j = 0; j < pn; j++) {
+    for (int j = 0; j < pn-1; j++) {
       msg += doubleToString(dels[i][j]) + " ";
     }
+    msg += doubleToString(dels[i][pn-1]);
     if (i < sn -1) {
       msg += ",";
       memcpy(buf + bufpos, msg.c_str(), msg.length());
@@ -787,9 +801,10 @@ void DrlRouting::update(vector<vector<int>> pacNos, vector<vector<double>> dels,
   for (int i = 0; i < sn; i++) {
     msg = "";
     int pn = thrs[i].size();
-    for (int j = 0; j < pn; j++) {
+    for (int j = 0; j < pn-1; j++) {
       msg += doubleToString(thrs[i][j]) + " ";
     }
+    msg += doubleToString(thrs[i][pn-1]);
     if (i < sn -1) {
       msg += ",";
       memcpy(buf + bufpos, msg.c_str(), msg.length());
@@ -802,15 +817,17 @@ void DrlRouting::update(vector<vector<int>> pacNos, vector<vector<double>> dels,
   for (int i = 0; i < sn; i++) {
     msg = "";
     int pn = ECNpkts[i].size();
-    for (int j = 0; j < pn; j++) {
+    for (int j = 0; j < pn-1; j++) {
       msg += intToString(ECNpkts[i][j]) + " ";
     }
+    msg += intToString(ECNpkts[i][pn-1]);
     if (i < sn -1) {
       msg += ",";
       memcpy(buf + bufpos, msg.c_str(), msg.length());
       bufpos += msg.length();
     }
   }
+  msg += ";";
   memcpy(buf + bufpos, msg.c_str(), msg.length());
   bufpos += msg.length();
   
@@ -821,7 +838,7 @@ void DrlRouting::update(vector<vector<int>> pacNos, vector<vector<double>> dels,
   memcpy(Msg, msg.c_str(), msg.length());
   memcpy(Msg + msg.length(), buf, bufpos);
   bufpos += msg.length();
-  cout << endl << bufpos << endl;// << Msg << endl;
+  ///cout << endl << bufpos << endl;// << Msg << endl;
   /*construct Msg buffer end*/
   
   //return;
@@ -848,9 +865,9 @@ void DrlRouting::update(vector<vector<int>> pacNos, vector<vector<double>> dels,
   memset(Msg, 0, BUFSIZE);
   bzero(Msg, BUFSIZE);
   while (1) {
-  	msgLen = recv(client_fd, recvbuf, blockSize, 0);
+    msgLen = recv(client_fd, recvbuf, blockSize, 0);
     if (msgLen > 0){
-	  //printf("msgrecv:%s\n", recvbuf);
+    //printf("msgrecv:%s\n", recvbuf);
       if(msgTotalLen == 0) {
         string strTmp = recvbuf;
         int posTmp = strTmp.find_first_of(';', 0);
@@ -873,8 +890,7 @@ void DrlRouting::update(vector<vector<int>> pacNos, vector<vector<double>> dels,
   unsigned int end = 0;
   string subStrMsg = strMsg.substr(start, msgContLen);
   start = 0;
-  cout << "strMsg:" << strMsg << endl;
-  //cout << "subStrMsg:" << subStrMsg << endl;
+  if(printEnable0) cout << "subStrMsg:" << subStrMsg << endl;
   vector<double> ratios;
   do {
     end = subStrMsg.find_first_of(',', start);
@@ -882,8 +898,7 @@ void DrlRouting::update(vector<vector<int>> pacNos, vector<vector<double>> dels,
     ratios.push_back(stringToDouble(tmp));
     start = end+1;
   }while(end < subStrMsg.size());
-  cout << "update2 time22:" << Simulator::Now().GetSeconds() << endl;
-  #if 0
+  #if 1
   int k = 0;
   for(int i = 0;i < sessionNum; i++)
     for(unsigned int j=0; j < sRatios[i].size(); j++) 
@@ -975,6 +990,10 @@ void DrlRouting::setECNqThr(uint16_t thr)
 {
   ECNqThr=thr;
 }
+void DrlRouting::setServerPort(int port)
+{
+  server_port=port;
+}
 void DrlRouting::setInputPath(string path)
 {
   inputPath=path;
@@ -1030,5 +1049,4 @@ void DrlRouting::randRatio()
     for(int j=0; j<pn; j++) sRatios[i][j]=sRatios[i][j]/sum;
   }
 }
-
 
