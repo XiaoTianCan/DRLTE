@@ -249,6 +249,7 @@ if not SIM_FLAG:
 
     state = np.zeros(DIM_STATE)
     action = utilize.convert_action(np.ones(DIM_ACTION), NUM_PATHS)
+
     agent = DrlAgent(state, action)
     ret_c = tuple(action)
 
@@ -304,8 +305,8 @@ def split_arg(para):
     delay = np.sum(np.array(dels, dtype=np.float64), axis=1)
 
     reward = np.sum(np.log(thr) - DELTA * np.log(delay))
-    # state_new = np.concatenate((thr, delay))
-    state_new = np.concatenate((np.log(thr), np.log(delay)))
+    state_new = np.concatenate((thr, delay))
+    #state_new = np.concatenate((np.log(thr), np.log(delay)))
 
     print(thr, file=file_thr_out)
     print(delay, file=file_del_out)
