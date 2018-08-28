@@ -1,16 +1,16 @@
 The title means the setups of simulation
-e.g. NSF_s20_SHR_p3_r20_30
+e.g. NSF_c1000_s10_SHR_p3_r60_80
 topology: NSF
-session number: 20
+capacity: 1000Mbps
+session number: 10
 ways getting predefined paths: top-k shortest path
 maximum number of paths for each session: 3
-minimum rate of session: 20Mbps
-maximum session of session: 30Mbps
+minimum rate of session: 60Mbps
+maximum session of session: 80Mbps
 
 
 possible topos: 
 	NSF 
-	1755 
 	1221 
 	.etc
 possible ways getting predefined paths:

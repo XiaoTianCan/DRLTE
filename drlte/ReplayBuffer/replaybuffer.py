@@ -9,6 +9,7 @@ import random
 import numpy as np
 
 from ReplayBuffer import sum_tree
+import math
 
 
 class ReplayBuffer():
@@ -96,7 +97,13 @@ class PrioritizedReplayBuffer():
             sample's td-error
         """
         priority = self.__getPriority(error, gradient)
-        self.tree.add(data, priority)
+        if(math.isnan(np.sum(priority))):
+            print("**********************")
+            print("error:", error)
+            print("gradient:", gradient)
+            print("priority:", priority)
+            input()
+        self.tree.add(data, np.sum(priority))
 
     def __getPriority(self, error, gradient):
         priority = self.__mu * np.array(error) + (1 - self.__mu) * np.array(gradient)
@@ -140,11 +147,12 @@ class PrioritizedReplayBuffer():
             r = random.uniform(min_val, max_val)
             data, priority, index = self.tree.find(r, norm=False)
 
-            weights.append((1. / self.memory_size / priority) ** beta if priority > 1e-16 else 0)
+            weights.append((1. / self.memory_size / priority) ** beta if priority > 1e-16 else 0.)
             indices.append(index)
             out.append(data)
 
         weights /= max(weights)  # Normalize for stability
+
 
         return out, weights, indices
 

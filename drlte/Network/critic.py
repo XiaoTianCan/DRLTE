@@ -12,13 +12,15 @@ class CriticNetwork():
         self.__dim_a = dim_action
         self.__learning_rate = learning_rate
         self.__tau = tau
-
+        
+        cur_para_num = len(tf.trainable_variables())
         self.__inputs, self.__action, self.__out = self.buildNetwork()
-        self.__paras = tf.trainable_variables()[num_actor_vars:]
+        #self.__paras = tf.trainable_variables()[num_actor_vars:]
+        self.__paras = tf.trainable_variables()[cur_para_num:]
 
         self.__target_inputs, self.__target_action, self.__target_out = self.buildNetwork()
-
-        self.__target_paras = tf.trainable_variables()[(len(self.__paras) + num_actor_vars):]
+        #self.__target_paras = tf.trainable_variables()[(len(self.__paras) + num_actor_vars):]
+        self.__target_paras = tf.trainable_variables()[(len(self.__paras) + cur_para_num):]
 
         self.__ops_update_target = []
         for i in range(len(self.__target_paras)):
@@ -43,6 +45,11 @@ class CriticNetwork():
 
         # net = tflearn.batch_normalization(inputs)
         net = inputs
+        
+        # temp modified by lcy
+        net = tflearn.fully_connected(net, 128, activation='LeakyReLU')
+        # end modified
+        
         net = tflearn.fully_connected(net, 32, activation='LeakyReLU')
 
         layer1 = tflearn.fully_connected(net, 64)

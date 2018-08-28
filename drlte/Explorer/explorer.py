@@ -24,9 +24,10 @@ class Explorer:
         self.__steps = epsilon_steps
         self.__num_paths = num_path
         self.__dim_act = dim_act
-        self.__num_act = utilize.convert_action(utilize.get_base_solution(self.__dim_act), num_path)
-        self.__fix_act = utilize.convert_action(utilize.get_fix_solution(), num_path)
-        self.__avg_act = utilize.convert_action(np.ones(self.__dim_act), num_path)
+        #self.__num_act = utilize.convert_action(utilize.get_base_solution(self.__dim_act), num_path)
+        self.__num_act = utilize.convert_action(np.ones(self.__dim_act), num_path)
+        #self.__fix_act = utilize.convert_action(utilize.get_fix_solution(), num_path) #being depretated
+        self.__avg_act = utilize.convert_action(np.ones(self.__dim_act), num_path) 
         self.__ospf_act = utilize.convert_action(np.zeros(self.__dim_act), num_path)
 
         self.__ep_last = -1
@@ -40,7 +41,8 @@ class Explorer:
         return act
 
     def get_act_ep(self, action):
-        self.__ep -= (self.__ep_b - self.__ep_e) / self.__steps
+        #self.__ep -= (self.__ep_b - self.__ep_e) / self.__steps
+        self.__ep -= self.__ep / self.__steps
         # Learn from extrema solution
         tmp = (2. * np.random.random(self.__dim_act) - 1.)
         # tmp *= utilize.get_ext_solution(self.__dim_act, self.__num_paths)

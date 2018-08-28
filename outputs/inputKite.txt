@@ -1,147 +1,28 @@
 --------------------------------------
-Time: 5.50205
-Split Ratios: 0.333333 0.333333 0.333333 
-Delays: 0.00390481 
-Throughputs: 1.06496 
-Utility: 5.60848 
+Time: 5.50163
+Split Ratios: 0.333333 0.333333 0.333333 0.5 0.5 
+Delays: 0.00397423 0.00487812 
+Throughputs: 10.3383 10.3875 
+Utility: 7.86378 7.66359 
 
 --------------------------------------
-Time: 6.02453
-Split Ratios: 0 0 1 
-Delays: 0.00433728 
-Throughputs: 0.966656 
-Utility: 5.4066 
+Time: 6.00209
+Split Ratios: 0.002 0.002 0.997 0.04 0.96 
+Delays: 0.00434053 0.00538026 
+Throughputs: 9.96147 10.2564 
+Utility: 7.73848 7.55292 
 
 --------------------------------------
-Time: 6.5467
-Split Ratios: 0 0 1 
-Delays: 0.00433814 
-Throughputs: 1.16326 
-Utility: 5.59154 
+Time: 6.50226
+Split Ratios: 0.415 0.336 0.249 0.923 0.077 
+Delays: 0.00399079 0.00443382 
+Throughputs: 10.3219 10.4694 
+Utility: 7.85804 7.76695 
 
 --------------------------------------
-Time: 7.04873
-Split Ratios: 0.145 0 0.854 
-Delays: 0.00433906 
-Throughputs: 1.17965 
-Utility: 5.60531 
-
---------------------------------------
-Time: 7.55232
-Split Ratios: 0 0 1 
-Delays: 0.00433763 
-Throughputs: 0.90112 
-Utility: 5.33631 
-
---------------------------------------
-Time: 8.06524
-Split Ratios: 0.02 0.054 0.925 
-Delays: 0.00429094 
-Throughputs: 1.14688 
-Utility: 5.58829 
-
---------------------------------------
-Time: 8.57374
-Split Ratios: 0 0 0.999 
-Delays: 0.00433833 
-Throughputs: 1.03219 
-Utility: 5.47195 
-
---------------------------------------
-Time: 9.07499
-Split Ratios: 0 0 0.999 
-Delays: 0.00433728 
-Throughputs: 1.04858 
-Utility: 5.48794 
-
---------------------------------------
-Time: 9.59951
-Split Ratios: 0.002 0.002 0.996 
-Delays: 0.00433728 
-Throughputs: 0.884736 
-Utility: 5.31804 
-
---------------------------------------
-Time: 10.1001
-Split Ratios: 0 0 1 
-Delays: 0.00433728 
-Throughputs: 0.851968 
-Utility: 5.2803 
-
---------------------------------------
-Time: 10.6167
-Split Ratios: 0 0 1 
-Delays: 0.0043388 
-Throughputs: 0.802816 
-Utility: 5.22053 
-
---------------------------------------
-Time: 11.1189
-Split Ratios: 0 0 1 
-Delays: 0.00433809 
-Throughputs: 1.03219 
-Utility: 5.472 
-
---------------------------------------
-Time: 11.6221
-Split Ratios: 0.854 0 0.146 
-Delays: 0.00433813 
-Throughputs: 1.16326 
-Utility: 5.59154 
-
---------------------------------------
-Time: 12.1241
-Split Ratios: 0.819 0 0.181 
-Delays: 0.00433728 
-Throughputs: 1.03219 
-Utility: 5.47219 
-
---------------------------------------
-Time: 12.6242
-Split Ratios: 0.131 0.608 0.261 
-Delays: 0.00379534 
-Throughputs: 1.44179 
-Utility: 5.93987 
-
---------------------------------------
-Time: 13.1266
-Split Ratios: 0.196 0 0.804 
-Delays: 0.00432133 
-Throughputs: 1.11411 
-Utility: 5.55225 
-
---------------------------------------
-Time: 13.6314
-Split Ratios: 0.258 0 0.742 
-Delays: 0.00433728 
-Throughputs: 0.950272 
-Utility: 5.3895 
-
---------------------------------------
-Time: 14.1317
-Split Ratios: 0 0.221 0.779 
-Delays: 0.00417036 
-Throughputs: 1.16326 
-Utility: 5.63098 
-
---------------------------------------
-Time: 14.6389
-Split Ratios: 0.004 0 0.996 
-Delays: 0.00433751 
-Throughputs: 1.09773 
-Utility: 5.5337 
-
---------------------------------------
-Time: 15.1502
-Split Ratios: 0.313 0.052 0.635 
-Delays: 0.00428306 
-Throughputs: 0.98304 
-Utility: 5.43598 
-
---------------------------------------
-Time: 15.6583
-Split Ratios: 0 0.861 0.139 
-Delays: 0.00342164 
-Throughputs: 0.950272 
-Utility: 5.62663 
+Time: 7.00243
+Split Ratios: 0.415 0.336 0.249 0.923 0.077 
+Delays: 0.00396306 0.00441923 
+Throughputs: 10.4694 10.453 
+Utility: 7.87919 7.76868 
 

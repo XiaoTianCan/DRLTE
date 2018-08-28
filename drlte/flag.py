@@ -16,6 +16,8 @@ FLAGS = flags.FLAGS
 flags.DEFINE_integer('server_port', '50001', 'remote server port')
 flags.DEFINE_string('server_ip', '127.0.0.1', 'remote server ip address')
 
+#flags.DEFINE_boolean('multi_agent', False, 'a center agent or multi-agent')
+
 flags.DEFINE_string('act_flag', 'drl', 'methods for explorer')
 flags.DEFINE_boolean('sim_flag', False, 'simulation flag')
 flags.DEFINE_integer('random_seed', 66, "seed for random generation")
@@ -49,3 +51,16 @@ flags.DEFINE_string('dir_sum', home_out('sum') + '/{0}', "the path of tf summary
 flags.DEFINE_string('dir_raw', home_out('raw') + '/{0}', 'the path of raw data')
 flags.DEFINE_string('dir_mod', home_out('mod') + '/{0}', 'the path of saved models')
 flags.DEFINE_string('dir_log', home_out('log') + '/{0}', 'the path of logs')
+
+# flags for features selection
+flags.DEFINE_string("feature_select", "00000001", "from left to right: delay(path and sess), thr_per_path, thr_per_sess, linked edge info, ecn, utils for each edge of each path of each session, utils for each edge of each session(uniqued)")
+flags.DEFINE_string("stamp_type", "__TIME_STAMP", "the stamp style for the name of log directory, may be TIME_STAMP or other specifial dir name show the features of the expr")
+flags.DEFINE_string("reward_type", "00001", "the type of the reward, from left to right, thr, delay, ecn, sess_maxutils+global_maxutils, agent_maxutils+global_maxutils")
+flags.DEFINE_string("agent_type", "multi_agent", "the method type for the agent include: drl_te, OSPF, MCF or multi_agent") # drlte maybe multiagent or not, for OSF and MCF multiagent must be False
+flags.DEFINE_string("mcf_path", None, "the answer files path for mcf method")
+
+# flags for dynamic learning rate (for multiagent)
+flags.DEFINE_float("deta_w", 1., "the ordinary learning rate factor")
+flags.DEFINE_float("deta_l", 1., "the learning rate factor for the bad situation") # deta_l > deta_w for multiagent
+flags.DEFINE_float("explo_dec", 300., "the decfactor for the explorer in exp decline") # may be not being used in the final version, only for test 2018.7.18
+flags.DEFINE_boolean("batch_mon", False, "whether to use previous batch to minimize maxutil")

@@ -1,7 +1,7 @@
 /*
 Simulation environment for DRL-TE
 V2.1
-Time:2018/6/25
+Time:2018/8/26
 LOG standard:
 NS_LOG_ERROR - error
 NS_LOG_WARN - warning
@@ -11,7 +11,7 @@ NS_LOG_FUNCTION - print function calling information and session related informa
 NS_LOG_LOGIC - print topology construction information and packet related information
 NS_LOG_ALL - all the information in sub-functions, no related function to LOG
 Changes:
-send session info to drlte
+
 */
 #include <stdio.h>
 #include <stdlib.h>
@@ -59,6 +59,8 @@ bool printEnable0;//init related
 bool printEnable1;//packet related
 bool enableFlag;//result related
 fstream outputFile;//output plot data
+bool burstFlag = false;
+bool failureFlag = false;
 
 class DrlRouting
 {
@@ -80,7 +82,7 @@ public:
   void begin();
   void randSendData(int iSession, uint8_t *data);
   void update();
-  void update(vector<vector<int>> pacNos, vector<vector<double>> dels, vector<vector<double>> thrs, vector<vector<int>> ECNpkts);
+  void update(vector<vector<int>> pacNos, vector<vector<double>> dels, vector<vector<double>> thrs, vector<vector<int>> ECNpkts, vector<pair<int,int>> srcEdges, vector<double> utilList, vector<double> lossList, double maxUtil, vector<int> netUtil, vector<vector<vector<int>>> sessPathUtil, vector<vector<int>> sessUtil);
   void saveToFile(vector<vector<int>> pacNos, vector<vector<double>> dels, vector<vector<double>> thrs, vector<vector<int>> ECNpkts);
 
   void setSendRate(vector<string> rates);
@@ -114,6 +116,7 @@ private:
   int port;
   int server_port;
   int nodeNum;
+  int topoNodeNum;
   int pathNum;
   int sessionNum;
   double stopTime;
@@ -133,9 +136,23 @@ private:
   NodeContainer nodes;
   InternetStackHelper internet;
   PointToPointHelper p2p;
+  //PointToPointHelper p2pB;//for bottle link
+  //DataRate capB;//for bottle link
+  //vector<int> bottleLink;//for bottle link
+  //vector<int> bDevId;//for bottle link
   vector<Edge> edges;
   vector<NetDeviceContainer> spDevices;
+  vector<NetDeviceContainer> spDevices2;//for maximum utilization compute
   Ptr<RateErrorModel> errModel;
+  vector< vector< Ptr<NetDevice> > > slDevices;
+  int srcTopoNode[500][20];//at most 500 nodes
+  vector<pair<int,int>> srcEdges;
+  vector<vector<uint32_t>> totalRxBytesV;
+  vector<vector<uint32_t>> dropPacketsV;
+  vector<vector<uint32_t>> totalPacketsV;
+  vector<uint32_t> totalRxBytes4maxUtil;
+  vector<uint32_t> sessSendPkts;
+  vector<vector<uint32_t>> totalRxBytes4spUtil;
   
   Ipv4AddressHelper ipv4;
   Ipv4StaticRoutingHelper srHelper;
@@ -165,7 +182,7 @@ int main(int argc, char *argv[])
 {
   #if 1                                                       //for simulation
   LogComponentEnable ("DrlEnv", LOG_LEVEL_INFO);
-  #elif false                                                 //for logic debug
+  #elif 0                                                     //for logic debug
   LogComponentEnableAll (LOG_PREFIX_TIME);                    //print time before each log information
   LogComponentEnable ("DrlEnv", LOG_LEVEL_FUNCTION);
   LogComponentEnable ("Ipv4StaticRouting", LOG_LEVEL_ERROR);
@@ -181,22 +198,33 @@ int main(int argc, char *argv[])
   int packetSize=1024;
   int serverPort=50001;
   double err_p=0.0;//?????0
-  uint16_t ECNqThr=200;
+  //for scale in
+  //uint16_t ECNqThr=200;
+  uint16_t ECNqThr=20;
   uint32_t seed=1;
   printEnable0=false;//debug now:remote server
   printEnable1=false;
   enableFlag=true;//for socket now
+  burstFlag=false;
+  failureFlag=false;
 
   CommandLine cmd;
   cmd.AddValue ("filename", "input filename", fileName);
   cmd.AddValue ("uptime", "update interval time", upTime);
   cmd.AddValue ("stoptime", "stop time, seconds", stopTime);
   cmd.AddValue ("packetsize", "KB", packetSize);
+  cmd.AddValue ("ecn", "ecn threshold", ECNqThr);
   cmd.AddValue ("serverport", "server port", serverPort);
+  cmd.AddValue ("burstflag", "burst flag", burstFlag);
+  cmd.AddValue ("failureflag", "failure flag", failureFlag);
   cmd.Parse(argc, argv);
   Config::SetDefault ("ns3::Queue::Mode", StringValue ("QUEUE_MODE_PACKETS"));
-  Config::SetDefault ("ns3::Queue::MaxPackets", UintegerValue(1000));
-  Config::SetDefault("ns3::UdpSocket::RcvBufSize", UintegerValue(100000000));
+  Config::SetDefault ("ns3::RedQueueDisc::ARED", BooleanValue (true));
+  //Config::SetDefault ("ns3::Queue::MaxPackets", UintegerValue(1000));
+  //Config::SetDefault("ns3::UdpSocket::RcvBufSize", UintegerValue(100000000));
+  //for scale in
+  Config::SetDefault ("ns3::Queue::MaxPackets", UintegerValue(50));
+  Config::SetDefault("ns3::UdpSocket::RcvBufSize", UintegerValue(10000000));
 
   SeedManager::SetSeed(seed);
   SeedManager::SetRun(seed);
@@ -204,7 +232,7 @@ int main(int argc, char *argv[])
   string TXT = ".txt";
   string inputPath("./scratch/DRLTE/inputs/" + fileName + TXT);
   string outputPath("./scratch/DRLTE/outputs/" + fileName + TXT);
-  system("dos2unix ./scratch/DRLTE/inputs/*.txt");
+  //system("dos2unix ./scratch/DRLTE/inputs/*.txt");
 //----------------------------------------------------------------
   NS_LOG_INFO("DrlRouting init begin!");
   DrlRouting drl=DrlRouting();
@@ -238,6 +266,7 @@ DrlRouting::DrlRouting()
   port=12345;
   server_port=54321;
   nodeNum=0;
+  topoNodeNum=0;
   pathNum=0;
   sessionNum=0;
   linkDelay="1ms";
@@ -247,6 +276,7 @@ DrlRouting::DrlRouting()
   data=new uint8_t[4000];//new a data block
   server_fd = -1;
   client_fd = -1;
+  memset(srcTopoNode, 0, 10000);
 }
 
 DrlRouting::~DrlRouting()
@@ -308,7 +338,7 @@ double getRand()
 }
 int getRand(vector<double> ratio)
 {
-  int max=100;
+  int max=1000;
   int len=ratio.size();
   vector<double> sec;
   double next=0.0;
@@ -400,7 +430,6 @@ void DrlRouting::addPathsFromFile()
     res.push_back(vec);
   }
   in.getline(buffer, 500);//send rates of the sessions
-  in.close();
   string str(buffer);
   NS_LOG_FUNCTION("session send rates: " << str);
   vector<string> v_sendRate;
@@ -411,6 +440,31 @@ void DrlRouting::addPathsFromFile()
     v_sendRate.push_back(str.substr(start, end-start).append("Mbps"));
     start=end+1;
   }while(end < str.size());
+  //for bottle neck link
+  /*
+  in.getline(buffer, 500);
+  string cap2(buffer);
+  cap2.append("Mbps");
+  capB = DataRate(cap2.c_str());
+  in.getline(buffer, 500);
+  string str2(buffer);
+  start=0;
+  end=0;
+  //cout << buffer << endl;
+  do {
+    end=str2.find_first_of(',', start);
+    string node = str2.substr(start, end-start);
+    bottleLink.push_back(stringToInt(node.c_str()));
+    start=end+1;
+  }while(end < str2.size());
+  for(unsigned int i =0;i<bottleLink.size();i++){
+    cout << bottleLink[i];
+    if(i%2==0) cout << "-";
+    else cout << " ";
+  }cout<<endl;
+  */
+  //end bottle neck link
+  in.close();
   setSendRate(v_sendRate);//set sendRates in DrlRouting
   setCap(cap);//set cap in DrlRouting
   for(unsigned int i=0; i<res.size(); i++){//init sPaths and sRatios
@@ -447,20 +501,41 @@ void DrlRouting::addPath(vector<int> pPath_, double ratio_)//init sPaths and sRa
 void DrlRouting::initNodes()
 {
   int maxNodei=0;//maximum node  id
+  int maxTopoNodei=0;
   sessionNum=sPaths.size();
   pathNum=0;
-  for(int i=0; i<sessionNum; i++)
+  for(int i=0; i<sessionNum; i++) {
+    srcTopoNode[sPaths[i][0][1]][0] = 0;
     for(unsigned int j=0; j<sPaths[i].size(); j++){
       pathNum++;
-      for(unsigned int k=0; k<sPaths[i][j].size(); k++)
+      int l;
+      for(l = 1; l <= srcTopoNode[sPaths[i][0][1]][0]; l++) {
+        if(srcTopoNode[sPaths[i][0][1]][l] == sPaths[i][j][2]) break;
+      }
+      if(l > srcTopoNode[sPaths[i][0][1]][0]){
+        srcTopoNode[sPaths[i][0][1]][0] += 1;
+        srcTopoNode[sPaths[i][0][1]][l] = sPaths[i][j][2];
+      }
+      for(unsigned int k=0; k<sPaths[i][j].size(); k++) {
         if(sPaths[i][j][k]>maxNodei) maxNodei=sPaths[i][j][k];
+        if(k>0 && k<sPaths[i][j].size()-1)
+          if(sPaths[i][j][k]>maxTopoNodei) 
+            maxTopoNodei=sPaths[i][j][k];
+      }
     }
+  }
   nodeNum=maxNodei+1;
+  topoNodeNum=maxTopoNodei+1;
   for(int i=0;i<nodeNum;i++){
     Ptr<Node> node=CreateObject<Node>();//create node
     nodes.Add(node);
   }
   internet.Install(nodes);//install protocol stack
+  vector<Ptr <NetDevice> > lDevices;
+  for(int i=0;i<topoNodeNum;i++){
+    slDevices.push_back(lDevices);
+  }
+  ////cout << "topoNodeNum: " << topoNodeNum << endl;
   return;
 }
 
@@ -469,10 +544,16 @@ void DrlRouting::initPaths()
   NS_LOG_FUNCTION("initPaths()");
   p2p.SetDeviceAttribute("DataRate", DataRateValue(cap));//set link attributes
   p2p.SetChannelAttribute("Delay", StringValue(linkDelay));
-
+  //for random bottle neck link
+  //p2pB.SetDeviceAttribute("DataRate", DataRateValue(capB));//set link attributes
+  //p2pB.SetChannelAttribute("Delay", StringValue(linkDelay));
+  //vector<int> bLinkHelper;
+  //for(unsigned int i=0;i<bottleLink.size();i++){
+  //  bLinkHelper.push_back(bottleLink[i]*1000+bottleLink[i+1]);
+  //  i++;
+  //}
   errModel=CreateObject<RateErrorModel>(); 
   errModel->SetAttribute("ErrorRate", DoubleValue(err_p));//set error model of channel
-
   for(int i=0; i<sessionNum; i++){
     int pathNum_=sPaths[i].size();
     vector< vector<int> > sePaths;
@@ -489,7 +570,7 @@ void DrlRouting::initPaths()
         int dir= i1<i2 ? 1 : -1;
         if(edgeNo>=0){
           pePaths.push_back((edgeNo+1)*dir);
-          NS_LOG_LOGIC("session:"<<i<<", path:"<<j<<", step:"<<k<<". edge:("<<i1<<"->"<<i2<<")="<<pePaths.back());
+          NS_LOG_LOGIC("session-:"<<i<<", path:"<<j<<", step:"<<k<<". edge:("<<i1<<"->"<<i2<<")="<<pePaths.back());
           continue;
         }
         pePaths.push_back((edges.size()+1)*dir);
@@ -498,10 +579,49 @@ void DrlRouting::initPaths()
         Ptr<Node> n1=nodes.Get(is);
         Ptr<Node> n2=nodes.Get(ib);
         NodeContainer pair=NodeContainer(n1, n2);
-        NetDeviceContainer step=p2p.Install(pair);
+        //for bottleneck link
+        //unsigned int bLinkNum = 0;
+        //for(bLinkNum=0; bLinkNum<bLinkHelper.size(); bLinkNum++){
+        //  if(bLinkHelper[bLinkNum] == (is*1000+ib)) break;
+        //}
+        NetDeviceContainer step;
+        //if(bLinkNum<bLinkHelper.size()){
+        //  step=p2pB.Install(pair);
+       //   cout << "installed bottleneck link:" << is << "-" << ib << endl;
+        ///  bDevId.push_back(spDevices2.size());//for maximum util
+        //}
+        //else
+          step=p2p.Install(pair);
         step.Get(0)->SetAttribute("ReceiveErrorModel", PointerValue(errModel));
         step.Get(1)->SetAttribute("ReceiveErrorModel", PointerValue(errModel));
         spDevices.push_back(step);
+        if(ib < topoNodeNum){
+          //cout << is << " " << ib << endl;
+          spDevices2.push_back(step);
+        }
+
+        if (srcTopoNode[i1][0] > 0) {
+          int l;
+          for(l = 1; l <= srcTopoNode[i1][0]; l++) {
+            if(srcTopoNode[i1][l] == i2) break;
+          }
+          if(l <= srcTopoNode[i1][0]) {
+            Ptr<NetDevice> nd = (i1==is?step.Get(0):step.Get(1));
+            slDevices[i1].push_back(nd);
+          }
+        }
+        
+        if (srcTopoNode[i2][0] > 0) {
+          int l;
+          for(l = 1; l <= srcTopoNode[i2][0]; l++) {
+            if(srcTopoNode[i2][l] == i1) break;
+          }
+          if(l <= srcTopoNode[i2][0]) {
+            Ptr<NetDevice> nd = (i2==is?step.Get(0):step.Get(1));
+            slDevices[i2].push_back(nd);
+          }
+        }
+
       }
       sePaths.push_back(pePaths);
     }
@@ -591,6 +711,7 @@ void DrlRouting::initSocket()
 }
 void DrlRouting::initPyConnect()
 {
+  if(!enableFlag) return;
   //server_fd client_fd
   int server_port = this->server_port;///54321;
   int lisNum = 1;
@@ -623,7 +744,7 @@ void DrlRouting::initPyConnect()
   
   len = sizeof(struct sockaddr); 
   //return;
-  while (enableFlag) {
+  while (1) {
   if ((client_fd = accept(server_fd, (struct sockaddr *) &their_addr, &len)) == -1) {  
       NS_LOG_ERROR("Accept error!");
       exit(1);  
@@ -633,18 +754,115 @@ void DrlRouting::initPyConnect()
     }
   }//while end
   //send session info
+  char sendbuf[4000] = {0};
   string msg = "";
+  int bufpos = 0;
   for(int i=0; i<sessionNum; i++) {
     int pn = sPaths[i].size();
     int src = sPaths[i][0][1];
     msg += intToString(src) + ',' + intToString(pn);
     if(i < sessionNum -1) msg += ',';
   }
-  msg = intToString(msg.length()) + ';' + msg;
-  ///cout << "msg:" << msg << endl;
-  char sendbuf[2000];
-  memcpy(sendbuf, msg.c_str(), msg.length());
-  send(client_fd, sendbuf, msg.length(), 0);
+  msg+=";";
+  memcpy(sendbuf + bufpos, msg.c_str(), msg.length());
+  bufpos += msg.length();
+  //send network utilization
+  int spdNum = 2*spDevices2.size();
+  msg = "";
+  msg += intToString(spdNum);
+  msg += ";";
+  memcpy(sendbuf + bufpos, msg.c_str(), msg.length());
+  bufpos += msg.length();
+  //send src edges info
+  for(int i = 0; i < topoNodeNum; i++) {
+    int ndNum = slDevices[i].size();
+    msg = "";
+    msg += intToString(i) + " ";
+    msg += intToString(ndNum);
+    if (i < topoNodeNum -1) {
+      msg += ",";
+      memcpy(sendbuf + bufpos, msg.c_str(), msg.length());
+      bufpos += msg.length();
+    }
+  }
+  msg += ";";
+  memcpy(sendbuf + bufpos, msg.c_str(), msg.length());
+  bufpos += msg.length();
+  //send session path link util info
+  vector<vector<int>> sessPathUtilNum;
+  vector<int> sessUtilNum;
+  for(int i=0; i<sessionNum; i++){
+    int pathNum_=sPaths[i].size();
+    vector<int> sesspathutilnum;
+    int sessutilnum = 0;
+    vector<Edge> sessEdge;
+    for(int j=0; j<pathNum_; j++){
+      int pathutilnum = 0;
+      int stepNum_=sPaths[i][j].size()-1;
+      for(int k=1; k<stepNum_-1; k++){
+        int dirEdge = ePaths[i][j][k];
+        int edgeNo;
+        if(dirEdge > 0){
+          edgeNo = dirEdge - 1;
+        }else{
+          edgeNo = -1*dirEdge - 1;
+        }
+        pathutilnum += 1;
+        int edgeno=indexOf(sessEdge, edges[edgeNo]);
+        if(edgeno < 0){
+          sessEdge.push_back(edges[edgeNo]);
+          sessutilnum += 1;
+        }
+        
+      }
+      sesspathutilnum.push_back(pathutilnum);
+    }
+    sessPathUtilNum.push_back(sesspathutilnum);
+    sessUtilNum.push_back(sessutilnum);
+  }
+  //write
+  for (int i = 0; i < sessionNum; i++) {
+    msg = "";
+    int pn = sessPathUtilNum[i].size();
+    for (int j = 0; j < pn; j++) {
+      msg += intToString(sessPathUtilNum[i][j]);
+      if(j < pn-1) msg += " ";
+    }
+    if (i < sessionNum -1) {
+      msg += ",";
+      memcpy(sendbuf + bufpos, msg.c_str(), msg.length());
+      bufpos += msg.length();
+    }
+  }
+  msg += ";";
+  memcpy(sendbuf + bufpos, msg.c_str(), msg.length());
+  bufpos += msg.length();
+  //write2
+  msg = "";
+  for (int i = 0; i < sessionNum; i++) {
+    msg += intToString(sessUtilNum[i]);
+    if (i < sessionNum -1) {
+      msg += ",";
+    }
+  }
+  msg += ";";
+  memcpy(sendbuf + bufpos, msg.c_str(), msg.length());
+  bufpos += msg.length();
+
+  
+
+
+/*for msg total length*/
+  msg = "";
+  msg = intToString(bufpos) + ";";
+  char Msg[4000];
+  memset(Msg, 0, 4000);
+  memcpy(Msg, msg.c_str(), msg.length());
+  memcpy(Msg + msg.length(), sendbuf, bufpos);
+  bufpos += msg.length();
+  cout << endl << bufpos << endl << Msg << endl;
+
+  send(client_fd, Msg, bufpos, 0);
 }
 //********************************************************
 /*scheduling functions*/
@@ -667,6 +885,7 @@ void DrlRouting::begin()
       endsSocks[i][j]->dels.clear();
       endsSocks[i][j]->qSizes.clear();
     }
+    sessSendPkts.push_back(0);
     Simulator::ScheduleNow(&DrlRouting::randSendData, this, i, data);
   }
 }
@@ -680,9 +899,13 @@ void DrlRouting::randSendData(int iSession, uint8_t *data)//size is the total am
   int iPath=getRand(sRatios[iSession]);//select a path
   int realPacSize = packetSize;
   Ptr<Packet> packet=Create<Packet>(data, realPacSize);
-  
+  sessSendPkts[iSession] += 1;
   #if 1//my way
   double dataRate_b=sendRates[iSession].GetBitRate();
+  //for burst test 2018.7.16
+  if(burstFlag && time>=7000 && iSession <= 2){
+    dataRate_b = dataRate_b*2;
+  }
   if(dataRate_b==0) return;
   double unit_t = 0.001;//s
   double lamda = dataRate_b*unit_t/(realPacSize*8);
@@ -718,6 +941,7 @@ void DrlRouting::update()
   vector<vector<double>> spThrs;
   vector<vector<int>> spECNpktNums;
   vector<vector<int>> spPacNos;
+  vector<vector<double>> linkUtil;
   for(int i=0; i<sessionNum; i++){
     int pathNum=sPaths[i].size();
     vector<double> dels;
@@ -744,7 +968,7 @@ void DrlRouting::update()
       dels.push_back(del);
       thrs.push_back(thr);
       ECNpktNums.push_back(ECNpktNum);
-      NS_LOG_FUNCTION("session:"<<i<<", path:"<<j<<", pacNo:"<<pacNo<<", thr:"<<thr<<", del:"<<del << ", ECNpktNum:" << ECNpktNum);
+      if(false) NS_LOG_FUNCTION("session:"<<i<<", path:"<<j<<", pacNo:"<<pacNo<<", thr:"<<thr<<", del:"<<del << ", ECNpktNum:" << ECNpktNum);
       endsSocks[i][j]->thrs.clear();
       endsSocks[i][j]->dels.clear();
       endsSocks[i][j]->qSizes.clear();
@@ -754,14 +978,210 @@ void DrlRouting::update()
     spECNpktNums.push_back(ECNpktNums);
     spPacNos.push_back(pacNos);
   }
+  /////for utilization calculate
+
+  Ptr<NetDevice> nd;
+  Ptr<PointToPointNetDevice> p2pnd;
+  Ptr<Queue> queue;
+  uint32_t totalDropBytes, totalRxBytes, totalBytes;
+  uint32_t totalDropPackets, totalRxPackets, totalPackets;
+
+
+  ///calculate session-based path-based link utilization
+  vector<vector<uint32_t>> totalRxBytes4spUtiltmp;
+  int devNum0 = spDevices.size();
+  if(upNum==1){
+    for(int i=0; i<devNum0; i++){
+      vector<uint32_t> tmp(2);
+      totalRxBytes4spUtil.push_back(tmp);
+    }
+  }
+  totalRxBytes4spUtiltmp = totalRxBytes4spUtil;
+  vector<vector<vector<int>>> sessPathUtil;
+  vector<vector<int>> sessUtil;
+  for(int i=0; i<sessionNum; i++){
+    int pathNum_=sPaths[i].size();
+    vector<vector<int>> sesspathutil;
+    vector<int> sessutil;
+    vector<Edge> sessEdge;
+    for(int j=0; j<pathNum_; j++){
+      vector<int> pathutil;
+      int stepNum_=sPaths[i][j].size()-1;
+      for(int k=1; k<stepNum_-1; k++){
+        int dirEdge = ePaths[i][j][k];
+        int edgeNo, portNo;
+        double util;
+        if(dirEdge > 0){
+          edgeNo = dirEdge - 1;
+          portNo = 0;
+        }else{
+          edgeNo = -1*dirEdge - 1;
+          portNo = 1;
+        }
+        nd = spDevices[edgeNo].Get(portNo);
+        p2pnd = StaticCast<PointToPointNetDevice> (nd);
+        queue = p2pnd->GetQueue();
+        totalRxBytes = queue->GetTotalReceivedBytes();
+        util = ((double)(totalRxBytes-totalRxBytes4spUtil[edgeNo][portNo])*8*2)/cap.GetBitRate();
+        totalRxBytes4spUtiltmp[edgeNo][portNo] = totalRxBytes;
+
+        pathutil.push_back(int(util*10000));
+        int edgeno=indexOf(sessEdge, edges[edgeNo]);
+        if(edgeno < 0){
+          sessEdge.push_back(edges[edgeNo]);
+          sessutil.push_back(int(util*10000));
+        }
+        
+      }
+      sesspathutil.push_back(pathutil);
+    }
+    sessPathUtil.push_back(sesspathutil);
+    sessUtil.push_back(sessutil);
+  }
+  totalRxBytes4spUtil = totalRxBytes4spUtiltmp;
+  ////calculate every link utilization
+  int devNum = spDevices2.size();
+  double util, loss;
+  vector<double> utilList, lossList;
+
+  double maxUtil = 0.0;
+  int k = 0;
+  if(upNum==1){
+    for(int i=0; i<devNum*2; i++)
+      totalRxBytes4maxUtil.push_back(0);
+  }
+  //for failure test
+  //if(failureFlag && time >= 1006){
+    //failureFlag = false;
+    //int failDev=rand()%(devNum);
+    //spDevices[failDev]
+  //}
+  //failure test end
+  //cout << "---" << spDevices2.size() << "------" << spDevices.size() << endl;
+  //capB
+  vector<int> netUtil;
+  for(int i = 0; i < devNum; i++) {
+    double capa = 0;
+    //if(0 == std::count(bDevId.begin(), bDevId.end(), i)){
+      capa = cap.GetBitRate();
+    //}else{
+      //capa = capB.GetBitRate();
+      //cout << "capa:" << i << endl;
+    //}
+    nd = spDevices2[i].Get(0);
+    p2pnd = StaticCast<PointToPointNetDevice> (nd);
+    queue = p2pnd->GetQueue();
+    totalRxBytes = queue->GetTotalReceivedBytes();
+    util = ((double)(totalRxBytes-totalRxBytes4maxUtil[k])*8*2)/capa;
+    totalRxBytes4maxUtil[k] = totalRxBytes;
+    k++;
+    ////cout << "util:" << util << endl;
+    maxUtil = maxUtil > util?maxUtil:util;
+    netUtil.push_back(int(util*10000));
+
+
+    nd = spDevices2[i].Get(1);
+    p2pnd = StaticCast<PointToPointNetDevice> (nd);
+    queue = p2pnd->GetQueue();
+    totalRxBytes = queue->GetTotalReceivedBytes();
+    util = ((double)(totalRxBytes-totalRxBytes4maxUtil[k])*8*2)/capa;
+    totalRxBytes4maxUtil[k] = totalRxBytes;
+    k++;
+    ////cout << "util:" << util << endl;
+    maxUtil = maxUtil > util?maxUtil:util;
+    netUtil.push_back(int(util*10000));
+  }
+  cout << "maxUtil:" << maxUtil << endl;
+  #if 0
+  for(int i = 0; i < nodeNum; i++) {
+    cout << "hear0" << endl;
+    for(uint32_t j = 1; j < nodes.Get(i)->GetNDevices(); j++) {//loopback interface should not be counterd hear
+      nd = nodes.Get(i)->GetDevice(j);
+      p2pnd = StaticCast<PointToPointNetDevice> (nd);
+      queue = p2pnd->GetQueue();
+      totalDropBytes = queue->GetTotalDroppedBytes();
+      totalRxBytes = queue->GetTotalReceivedBytes();
+      totalBytes = totalDropBytes + totalRxBytes;
+      cout << "---------" << endl;
+      cout << "totalDropBytes:" << totalDropBytes << " totalRxBytes:" << totalRxBytes << " totalBytes:" << totalBytes << endl;
+      totalDropPackets = queue->GetTotalDroppedPackets();
+      totalRxPackets = queue->GetTotalReceivedPackets();
+      totalPackets = totalDropPackets + totalRxPackets;
+      cout << "totalDropPackets:" << totalDropPackets << " totalRxPackets:" << totalRxPackets << " totalPackets:" << totalPackets << endl;
+      util = ((double)totalRxBytes*8*2)/cap.GetBitRate();
+      loss = ((double)totalDropBytes)/totalBytes;
+      cout << "util:" << util << " loss:" << loss << endl;
+    }
+  }
+  #endif
+  ////calculate link utilizations for links of each node
+  for(int i = 0; i < topoNodeNum; i++) {
+    ////cout << "src node: " << i << endl;
+    int ndNum = slDevices[i].size();
+    if(upNum == 1) {
+      vector<uint32_t> tmpv;
+      for(int k=0; k < ndNum; k++){
+        tmpv.push_back(0);
+      }
+      totalRxBytesV.push_back(tmpv);
+      dropPacketsV.push_back(tmpv);
+      totalPacketsV.push_back(tmpv);
+      pair<int,int> tmpp;
+      tmpp.first = i;
+      tmpp.second = ndNum;
+      srcEdges.push_back(tmpp);
+    }
+    if(ndNum == 0) continue;
+    for(int j = 0; j < ndNum; j++) {
+      nd = slDevices[i][j];
+      p2pnd = StaticCast<PointToPointNetDevice> (nd);
+      queue = p2pnd->GetQueue();
+      totalDropBytes = queue->GetTotalDroppedBytes();
+      totalRxBytes = queue->GetTotalReceivedBytes();
+      totalBytes = totalDropBytes + totalRxBytes;
+      if(false)
+      ////cout << "---------" << endl;
+        cout << "totalDropBytes:" << totalDropBytes << " totalRxBytes:" << totalRxBytes << " totalBytes:" << totalBytes << endl;
+      totalDropPackets = queue->GetTotalDroppedPackets();
+      totalRxPackets = queue->GetTotalReceivedPackets();
+      totalPackets = totalDropPackets + totalRxPackets;
+      ////cout << "totalDropPackets:" << totalDropPackets << " totalRxPackets:" << totalRxPackets << " totalPackets:" << totalPackets << endl;
+      util = ((double)(totalRxBytes-totalRxBytesV[i][j])*8*2)/cap.GetBitRate();
+      if(totalPackets == totalPacketsV[i][j]) 
+        loss = ((double)(totalDropPackets-dropPacketsV[i][j]))/(totalPackets-totalPacketsV[i][j]);
+      else loss = 0.0;
+      ////cout << "util:" << util << " loss:" << loss << endl;
+      utilList.push_back(util);
+      lossList.push_back(loss);
+      totalRxBytesV[i][j] = totalRxBytes;
+      dropPacketsV[i][j]=totalDropPackets;
+      totalPacketsV[i][j]=totalPackets;
+    }
+  }
+
 
   saveToFile(spPacNos, spDels, spThrs, spECNpktNums);
-  update(spPacNos, spDels, spThrs, spECNpktNums);
+  update(spPacNos, spDels, spThrs, spECNpktNums, srcEdges, utilList, lossList, maxUtil, netUtil, sessPathUtil, sessUtil);
+  #if 1
+  cout << "sessSendPkts:" << endl;
+  for(unsigned int i=0; i < sessSendPkts.size(); i++){
+    cout << sessSendPkts[i] << "(";
+    sessSendPkts[i] = 0;
+    int pathNum=sPaths[i].size();
+    uint32_t pktTotal = 0;
+    for(int j=0; j<pathNum; j++){
+      pktTotal += spPacNos[i][j];
+    }
+    cout << pktTotal << ") ";
+  }
+  cout << endl;
+  #endif
   //randRatio();
-//  if(upNum%20==0) updateWindow();
+  //if(upNum%20==0) updateWindow();
 }
 
-void DrlRouting::update(vector<vector<int>> pacNos, vector<vector<double>> dels, vector<vector<double>> thrs, vector<vector<int>> ECNpkts)
+void DrlRouting::update(vector<vector<int>> pacNos, vector<vector<double>> dels, vector<vector<double>> thrs, vector<vector<int>> ECNpkts, 
+  vector<pair<int,int>> srcEdges, vector<double> utilList, vector<double> lossList, double maxUtil, vector<int> netUtil, vector<vector<vector<int>>> sessPathUtil, vector<vector<int>> sessUtil)
 {
   if (!enableFlag) return;
   NS_LOG_FUNCTION("communicate with drl server");
@@ -772,12 +1192,13 @@ void DrlRouting::update(vector<vector<int>> pacNos, vector<vector<double>> dels,
       return;
   }
   /*construct Msg buffer*/
-  int BUFSIZE = 20000;
+  int BUFSIZE = 30000;
   char buf[BUFSIZE];
   memset(buf, 0, BUFSIZE);
   int bufpos = 0;
   string msg = "";
   int sn = sessionNum;
+  /*for pacNos*/
   for (int i = 0; i < sn; i++) {
     msg = "";
     int pn = pacNos[i].size();
@@ -794,6 +1215,7 @@ void DrlRouting::update(vector<vector<int>> pacNos, vector<vector<double>> dels,
   msg += ";";
   memcpy(buf + bufpos, msg.c_str(), msg.length());
   bufpos += msg.length();
+  /*for dels*/
   for (int i = 0; i < sn; i++) {
     msg = "";
     int pn = dels[i].size();
@@ -810,6 +1232,7 @@ void DrlRouting::update(vector<vector<int>> pacNos, vector<vector<double>> dels,
   msg += ";";
   memcpy(buf + bufpos, msg.c_str(), msg.length());
   bufpos += msg.length();
+  /*for thrs*/
   for (int i = 0; i < sn; i++) {
     msg = "";
     int pn = thrs[i].size();
@@ -826,6 +1249,7 @@ void DrlRouting::update(vector<vector<int>> pacNos, vector<vector<double>> dels,
   msg += ";";
   memcpy(buf + bufpos, msg.c_str(), msg.length());
   bufpos += msg.length();
+  /*for ECN pkts*/
   for (int i = 0; i < sn; i++) {
     msg = "";
     int pn = ECNpkts[i].size();
@@ -842,7 +1266,98 @@ void DrlRouting::update(vector<vector<int>> pacNos, vector<vector<double>> dels,
   msg += ";";
   memcpy(buf + bufpos, msg.c_str(), msg.length());
   bufpos += msg.length();
-  
+  /*for srcEdges*/
+  uint16_t srcNodesNum = srcEdges.size();
+  for (uint16_t i = 0; i < srcNodesNum; i++) {
+    msg = "";
+    msg += intToString(srcEdges[i].first) + " ";
+    msg += intToString(srcEdges[i].second);
+    if (i < srcNodesNum -1) {
+      msg += ",";
+      memcpy(buf + bufpos, msg.c_str(), msg.length());
+      bufpos += msg.length();
+    }
+  }
+  msg += ";";
+  memcpy(buf + bufpos, msg.c_str(), msg.length());
+  bufpos += msg.length();
+  /*for utilList and lossList*/
+  uint16_t edgesNum = utilList.size();
+  for (uint16_t i = 0; i < edgesNum; i++) {
+    msg = "";
+    msg += doubleToString(utilList[i]) + " ";
+    msg += doubleToString(lossList[i]);
+    if (i < edgesNum -1) {
+      msg += ",";
+      memcpy(buf + bufpos, msg.c_str(), msg.length());
+      bufpos += msg.length();
+    }
+  }
+  msg += ";";
+  memcpy(buf + bufpos, msg.c_str(), msg.length());
+  bufpos += msg.length();
+  /*for maxutil*/
+  msg = "";
+  msg += doubleToString(maxUtil);
+  msg += ";";
+  memcpy(buf + bufpos, msg.c_str(), msg.length());
+  bufpos += msg.length();
+  /*for network utilization*/
+  uint16_t netUtilLen = netUtil.size();
+  for (uint16_t i = 0; i < netUtilLen; i++) {
+    msg = "";
+    msg += intToString(netUtil[i]);
+    if (i < netUtilLen -1) {
+      msg += ",";
+      memcpy(buf + bufpos, msg.c_str(), msg.length());
+      bufpos += msg.length();
+    }
+  }
+  msg += ";";
+  memcpy(buf + bufpos, msg.c_str(), msg.length());
+  bufpos += msg.length();
+  /*for session path link utilization*/
+  ///vector<vector<vector<int>>> sessPathUtil,
+  for (int i = 0; i < sn; i++) {
+    msg = "";
+    int pn = sessPathUtil[i].size();
+    for (int j = 0; j < pn; j++) {
+      int ln = sessPathUtil[i][j].size();
+      for(int k = 0; k < ln; k++) {
+        msg += intToString(sessPathUtil[i][j][k]);
+        if(k < ln-1) msg += "-";
+      }
+      if(j < pn-1) msg += " ";
+    }
+    if (i < sn -1) {
+      msg += ",";
+      memcpy(buf + bufpos, msg.c_str(), msg.length());
+      bufpos += msg.length();
+    }
+  }
+  msg += ";";
+  memcpy(buf + bufpos, msg.c_str(), msg.length());
+  bufpos += msg.length();
+  ///vector<vector<int>> sessUtil.
+  for (int i = 0; i < sn; i++) {
+    msg = "";
+    int ln = sessUtil[i].size();
+    for (int j = 0; j < ln; j++) {
+      msg += intToString(sessUtil[i][j]);
+      if(j < ln-1) msg += " ";
+    }
+    if (i < sn -1) {
+      msg += ",";
+      memcpy(buf + bufpos, msg.c_str(), msg.length());
+      bufpos += msg.length();
+    }
+  }
+  msg += ";";
+  memcpy(buf + bufpos, msg.c_str(), msg.length());
+  bufpos += msg.length();
+
+
+  /*for msg total length*/
   msg = "";
   msg = intToString(bufpos) + ";";
   char Msg[BUFSIZE];
@@ -850,7 +1365,7 @@ void DrlRouting::update(vector<vector<int>> pacNos, vector<vector<double>> dels,
   memcpy(Msg, msg.c_str(), msg.length());
   memcpy(Msg + msg.length(), buf, bufpos);
   bufpos += msg.length();
-  ///cout << endl << bufpos << endl;// << Msg << endl;
+  //////cout << endl << bufpos << endl << Msg << endl;
   /*construct Msg buffer end*/
   
   //return;
@@ -861,10 +1376,15 @@ void DrlRouting::update(vector<vector<int>> pacNos, vector<vector<double>> dels,
   int blockNum = (int)((blockSize - 1 + bufpos)/blockSize);
   for (int i = 0; i < blockNum; i++) {
     char sendbuf[blockSize] = {0};
-    if (i < blockNum -1)
+    if (i < blockNum -1) {
       memcpy(sendbuf, Msg + i*blockSize, blockSize);
-    else memcpy(sendbuf, Msg + i*blockSize, bufpos-blockSize*i);
-    msgLen = send(client_fd, sendbuf, blockSize, 0);
+      msgLen = send(client_fd, sendbuf, blockSize, 0);
+    }
+    else {
+    	memcpy(sendbuf, Msg + i*blockSize, bufpos-blockSize*i);
+    	msgLen = send(client_fd, sendbuf, bufpos-blockSize*i, 0);
+    }
+    
     //cout << "msgLen:" << msgLen << endl;
   }
   
@@ -937,7 +1457,7 @@ void DrlRouting::saveToFile(vector<vector<int>> pacNos, vector<vector<double>> d
     double delAve=0;
     double ECNratio = (double)(ECNpktSum)/(double)(pacNoSum);
     if(pacNoSum>0) for(int j=0; j<pn; j++) delAve+=dels[i][j]*pacNos[i][j]/pacNoSum;
-    NS_LOG_FUNCTION("session "<<i<<",thrSum:"<<thrSum<<"Mbps, aveDel:"<<delAve<<"s, ECNratio:"<<ECNratio);
+    if(false) NS_LOG_FUNCTION("session "<<i<<",thrSum:"<<thrSum<<"Mbps, aveDel:"<<delAve<<"s, ECNratio:"<<ECNratio);
     sesthr.push_back(thrSum);
     sesdel.push_back(delAve);
     if(thrSum>0 && delAve >0) seslog.push_back(log(thrSum)-log(delAve));

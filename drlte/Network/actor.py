@@ -19,14 +19,15 @@ class ActorNetwork:
         self.__tau = tau
 
         # performance network
+        cur_para_num = len(tf.trainable_variables())
         self.__input, self.__out, self.__out_scaled = self.buildNetwork()
-
-        self.__paras = tf.trainable_variables()
+        #self.__paras = tf.trainable_variables()
+        self.__paras = tf.trainable_variables()[cur_para_num:]
 
         # Target network
         self.__target_input, self.__target_out, self.__target_out_scaled = self.buildNetwork()
-
-        self.__target_paras = tf.trainable_variables()[len(self.__paras):]
+        #self.__target_paras = tf.trainable_variables()[len(self.__paras):]
+        self.__target_paras = tf.trainable_variables()[(len(self.__paras) + cur_para_num):]
 
         # update parameters of target network
         self.__ops_update_target = []
@@ -66,17 +67,22 @@ class ActorNetwork:
         _inputs = tflearn.input_data(shape=[None, self.__dim_s])
         # net = tflearn.batch_normalization(_inputs)
         net = _inputs
+        
+        # temp modified by lcy
+        net = tflearn.fully_connected(net, 128, activation='LeakyReLU')
+        # end modified
+
         net = tflearn.fully_connected(net, 64, activation='LeakyReLU')
         net = tflearn.fully_connected(net, 32, activation='LeakyReLU')
         # as original paper indicates
         w_init = tflearn.initializations.uniform(minval=-3e-3, maxval=3e-3)
 
         # out = tflearn.fully_connected(net, self.__dim_a, activation='tanh', weights_init=w_init)
-
         out_vec = []
         for i in self.__num_path:
             out = tflearn.fully_connected(net, i, activation='softmax', weights_init=w_init)
             out_vec.append(out)
+        #if len(out_vec) > 1:
         out = tf.concat([i for i in out_vec], axis=1)
 
         out_scaled = tf.multiply(out, self.__max_a)

@@ -44,13 +44,14 @@ class SumTree(object):
         return self._find(value, 0)
 
     def _find(self, value, index):
+        print("process:", index, self.tree[index], value)
         if 2 ** (self.tree_level - 1) - 1 <= index:
             return self.data[int(index - (2 ** (self.tree_level - 1) - 1))], self.tree[index], index - (
             2 ** (self.tree_level - 1) - 1)
 
         left = self.tree[2 * index + 1]
 
-        if value <= left:
+        if value <= left + 1e-9:
             return self._find(value, 2 * index + 1)
         else:
             return self._find(value - left, 2 * (index + 1))
