@@ -28,6 +28,9 @@ git clone https://github.com/XiaoTianCan/DRLTE.git
 git fetch origin
 git merge origin/master
 
+#change branch
+checkout branchname
+
 #cancel
 git reset
 
