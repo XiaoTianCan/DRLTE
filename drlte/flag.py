@@ -16,14 +16,9 @@ FLAGS = flags.FLAGS
 flags.DEFINE_integer('server_port', '50001', 'remote server port')
 flags.DEFINE_string('server_ip', '127.0.0.1', 'remote server ip address')
 
-#flags.DEFINE_boolean('multi_agent', False, 'a center agent or multi-agent')
-
 flags.DEFINE_string('act_flag', 'drl', 'methods for explorer')
 flags.DEFINE_boolean('sim_flag', False, 'simulation flag')
 flags.DEFINE_integer('random_seed', 66, "seed for random generation")
-
-flags.DEFINE_integer('dim_state', 20*2, 'the dimension of state')
-flags.DEFINE_integer('dim_action', 20*3, 'the dimension of action')
 
 flags.DEFINE_integer('size_buffer', 100000, 'the size of replay buffer')
 flags.DEFINE_integer('mini_batch', 32, "size of mini batch")

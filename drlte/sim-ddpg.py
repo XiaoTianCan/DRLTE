@@ -28,9 +28,9 @@ SIM_FLAG = getattr(FLAGS, 'sim_flag')
 ACT_FLAG = getattr(FLAGS, 'act_flag')
 SEED = getattr(FLAGS, 'random_seed')
 
-DIM_STATE = getattr(FLAGS, 'dim_state')
-DIM_ACTION = getattr(FLAGS, 'dim_action')
-NUM_PATHS = [3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3]
+DIM_STATE = None
+DIM_ACTION = None
+NUM_PATHS = []
 
 ACTOR_LEARNING_RATE = getattr(FLAGS, 'learning_rate_actor')
 CRITIC_LEARNING_RATE = getattr(FLAGS, 'learning_rate_critic')
@@ -63,7 +63,7 @@ DIR_RAW = getattr(FLAGS, 'dir_raw').format(REAL_STAMP)
 DIR_MOD = getattr(FLAGS, 'dir_mod').format(REAL_STAMP)
 DIR_LOG = getattr(FLAGS, 'dir_log').format(REAL_STAMP)
 
-                #reward = np.sum(np.log(np.array(thr_sum)) - DELTA * np.log(np.array(ecnpkt) + 1e-10))
+#reward = np.sum(np.log(np.array(thr_sum)) - DELTA * np.log(np.array(ecnpkt) + 1e-10))
 
 FEAT_SELE = getattr(FLAGS, 'feature_select') # a string shows the features selected
 RWD_SELE = getattr(FLAGS, "reward_type") # only for multiagent
@@ -79,26 +79,25 @@ class DrlAgent:
         sess = tf.Session()
 
         self.__dim_state = dim_state
-                #reward = np.sum(np.log(np.array(thr_sum)) - DELTA * np.log(np.array(ecnpkt) + 1e-10))
         self.__dim_action = dim_action
 
         self.__actor = ActorNetwork(sess, dim_state, dim_action, ACTION_BOUND,
                                     ACTOR_LEARNING_RATE, TAU, num_paths)
         self.__critic = CriticNetwork(sess, dim_state, dim_action,
                                       CRITIC_LEARNING_RATE, TAU, self.__actor.num_trainable_vars)
-
+                                      
         self.__prioritized_replay = PrioritizedReplayBuffer(BUFFER_SIZE, MINI_BATCH, ALPHA, MU, SEED)
         self.__replay = ReplayBuffer(BUFFER_SIZE, SEED) # being depretated ?
-
-        self.__summary = Summary(sess, DIR_SUM)
-        self.__summary.add_variable(name='throughput')
-        self.__summary.add_variable(name='delay')
-        self.__summary.add_variable(name='reward')
-        self.__summary.add_variable(name='ep-reward')
-        self.__summary.add_variable(name='ep-max-q')
-        self.__summary.build()
+        
+        #self.__summary = Summary(sess, DIR_SUM)
+        #self.__summary.add_variable(name='throughput')
+        #self.__summary.add_variable(name='delay')
+        #self.__summary.add_variable(name='reward')
+        #self.__summary.add_variable(name='ep-reward')
+        #self.__summary.add_variable(name='ep-max-q')
+        #self.__summary.build()
         #self.__summary.write_vars(FLAGS)
-
+        
         self.__explorer = Explorer(EP_BEGIN, EP_END, EP_ST, dim_action, num_paths, SEED)
         #self.__explorer = Explorer(EP_BEGIN, EP_END, EXP_DEC, dim_action, num_paths, SEED)
 
@@ -126,7 +125,7 @@ class DrlAgent:
         self.__weights_curt = None
         self.__indices_curt = None
         self.__batch_mon = BATCH_MON # batch momentum
-
+        
     @property
     def timer(self):
         return '| %s '%ACT_FLAG \
@@ -143,16 +142,16 @@ class DrlAgent:
         #                             state_new,)).flatten()
         # print('state', state_new)
 
-        self.__summary.run(feed_dict={
+        '''self.__summary.run(feed_dict={
             'throughput': thr,
             'delay': dly,
             'reward': reward,
             'ep-reward': self.__ep_reward,
             'ep-max-q': self.__ep_avg_max_q/MAX_EP_STEPS
-        }, step=self.__episode*MAX_EP_STEPS+self.__step)
-        print(self.timer)
-        print('| Reward: %.4f' % reward,
-              '| action: ' + '%.2f ' * self.__dim_action % tuple(self.__action_curt))
+        }, step=self.__episode*MAX_EP_STEPS+self.__step)'''
+        # print(self.timer) # comment at 2018.8.29
+        # print('| Reward: %.4f' % reward,
+        #       '| action: ' + '%.2f ' * self.__dim_action % tuple(self.__action_curt))
         if self.__step >= MAX_EP_STEPS:
             self.__step = 0
             self.__episode += 1
@@ -245,9 +244,10 @@ class DrlAgent:
         a_outs = self.__actor.predict(batch_state)
         grads = self.__critic.calculate_gradients(batch_state, a_outs)
 
-        print('*'*20)
-        print("training_grad:", grads[0])
-        print("weights:", weights)
+        ##print('*'*20) # comment at 2018.8.29
+        ##print("training_grad:", grads[0])
+        ##print("weights:", weights)
+        
         #print("predicted_q:", predicted_q)
         #print("a_outs:", a_outs)
 
@@ -256,7 +256,7 @@ class DrlAgent:
                                                   np.array(batch_error).flatten(),
                                                   abs(np.mean(grads[0], axis=1)))
         
-        print("grads[0].shape:", grads[0].shape)
+        ##print("grads[0].shape:", grads[0].shape) # comment at 2018.8.29
         weighted_grads = weights * grads[0]
         # curr_stat = True means the agent is more probably in a right direction, otherwise in a wrong direction (need a larger gradient to chase other agent)
         if curr_stat:
@@ -268,46 +268,49 @@ class DrlAgent:
 
         self.__actor.update_target_paras()
         self.__critic.update_target_paras()
+        
 
 
 if not SIM_FLAG:
-    # receive the preset information
+    print("\n----Information list----")
+    print("agent_type: %s" % (AGENT_TYPE))
+    print("stamp_type: %s" % (REAL_STAMP))
     
+    # receive the initial information
     ns3Server = (SERVER_IP, SERVER_PORT)
     tcpSocket = socket(AF_INET, SOCK_STREAM)
     tcpSocket.connect(ns3Server)
-    
-    
+
+    # variables for socket msg
     msgTotalLen = 0
     msgRecvLen = 0
     msg = ""
     blockSize = 1024;
     BUFSIZE = 1025
+
+    # variables for store information
     sessionSrc = []
-    agents = []
-    srcEdgeNumDic = {}
     EDGE_NUM = None
+    srcEdgeNumDic = {}
     sessPathUtilNum = [] # utils num, i.e. edge num for each path of each session, shape: [[...], [...], ...]
     sessUtilNum = [] # utils num for each session, shape: [...]
+    agents = []
 
     while True:
         datarecv = tcpSocket.recv(BUFSIZE).decode()
         if len(datarecv) > 0:
             if msgTotalLen == 0:
                 totalLenStr = (datarecv.split(';'))[0]
-                msgTotalLen = int(totalLenStr) + len(totalLenStr) + 1#1 is the length of ';'
+                msgTotalLen = int(totalLenStr) + len(totalLenStr) + 1 #1 is the length of ';'
             msgRecvLen += len(datarecv)
             msg += datarecv
             if msgRecvLen < msgTotalLen: 
                 continue
-            #print(msg)
+            #print(msg) # gotton the complete message
+
+            # msg(';')[1]
             msgList = (msg.split(';')[1]).split(',');
-            
             #DIM_STATE = len(msgList) # sessionNum*2 only for concentrate type
-            EDGE_NUM = int(msg.split(';')[2])
-            print("EDGE_NUM %d" % EDGE_NUM)
-            DIM_STATE = EDGE_NUM # modified for util model 2018.7.19, now being deperated
-            
             DIM_ACTION = 0
             NUM_PATHS = []
             for i in range(len(msgList)):
@@ -317,7 +320,12 @@ if not SIM_FLAG:
                     DIM_ACTION += int(msgList[i])
                     NUM_PATHS.append(int(msgList[i]))
             
-            # information of preset linked edge for each src node
+            # msg(';')[2]
+            EDGE_NUM = int(msg.split(';')[2])
+            #print("EDGE_NUM %d" % EDGE_NUM)
+            DIM_STATE = EDGE_NUM # modified for util model 2018.7.19, now being deperated (still deperated 2018.8.28)
+            
+            # msg(';')[3]: information of preset linked edge for each src node
             srcEdgeNumList = (msg.split(';')[3]).split(',');
             for i in range(len(srcEdgeNumList)):
                 pair_ = srcEdgeNumList[i].split(' ')
@@ -325,29 +333,29 @@ if not SIM_FLAG:
                 srcEdges = int(pair_[1])
                 srcEdgeNumDic[srcNode] = srcEdges
             
-            # information of preset sess (path) utils
+            # msg(';')[4]and[5]: information of preset sess (path) utils
             sessPathUtilNumList = (msg.split(';')[4]).split(',')
             sessUtilNumList = (msg.split(';')[5]).split(',')
-            print("----->>>>>>>>>>>>>")
             for i in range(len(sessPathUtilNumList)):
                 sessPathUtilNum.append([])
                 sessUtilNum.append(int(sessUtilNumList[i]))
                 spuTmp = sessPathUtilNumList[i].split(" ")
                 for j in range(len(spuTmp)):
                     sessPathUtilNum[i].append(int(spuTmp[j]))
-            print("sessPathUtilNum:", sessPathUtilNum)
-            print("sessUtilNum:", sessUtilNum)
+            #print("sessPathUtilNum:", sessPathUtilNum)
+            #print("sessUtilNum:", sessUtilNum)
             
             break
 
-    print("DIM_STATE:", DIM_STATE)
-    print("DIM_ACTION:", DIM_ACTION)
-    print("NUM_PATHS:", NUM_PATHS)
-    print("sessionSrc:", sessionSrc)
-    print("srcEdgeNumDic:", srcEdgeNumDic)
+    #print("DIM_STATE:", DIM_STATE)
+    #print("DIM_ACTION:", DIM_ACTION)
+    #print("NUM_PATHS:", NUM_PATHS)
+    #print("sessionSrc:", sessionSrc)
+    #print("srcEdgeNumDic:", srcEdgeNumDic)
 
+	# init routing/scheduling policy: multi_agent, drl_te, mcf, ospf
     if AGENT_TYPE == "multi_agent":
-        AGENT_NUM = max(sessionSrc) + 1
+        AGENT_NUM = max(sessionSrc) + 1 # hear AGENT_NUM is not equal to the real valid "agent number"
         srcSessNum = [0] * AGENT_NUM
         srcPathNum = [0] * AGENT_NUM
         srcPathUtilNum = [0] * AGENT_NUM # utils num for each src, modified at 7.20
@@ -363,13 +371,14 @@ if not SIM_FLAG:
             srcUtilNum[sessionSrc[i]] += sessUtilNum[i]
             srcPathUtilNum[sessionSrc[i]] += sum(sessPathUtilNum[i])
 
-        print("srcSessNum", srcSessNum)
-        print("srcPathNum", srcPathNum)
-        print("srcPaths", srcPaths)
+        #print("srcSessNum", srcSessNum)
+        #print("srcPathNum", srcPathNum)
+        #print("srcPaths", srcPaths)
         
+        print("\nConstructing distributed agents ... \n")
         for i in range(AGENT_NUM):
             if (srcSessNum[i] > 0):
-                # calculate the state dimmension for each agent
+                # calculate the state dimension for each agent
                 temp_dim_s = 0
                 if(FEAT_SELE[0] == "1"):
                     temp_dim_s += srcPathNum[i]
@@ -394,30 +403,32 @@ if not SIM_FLAG:
 
                 state = np.zeros(temp_dim_s) 
                 action = utilize.convert_action(np.ones(srcPathNum[i]), srcPaths[i])
-                agent = DrlAgent(state, action, temp_dim_s, srcPathNum[i], srcPaths[i]) 
+                agent = DrlAgent(list(state), action, temp_dim_s, srcPathNum[i], srcPaths[i]) 
+
             else:
                 agent = None
             agents.append(agent)
         action = utilize.convert_action(np.ones(DIM_ACTION), NUM_PATHS)
         ret_c = tuple(action)
+        
     elif AGENT_TYPE == "drl_te":
+        print("\nConstructing centralized agent ... \n")
+        #print("init drl_te scheduling method!")
+        #print("DIM_STATE:", DIM_STATE, "DIM_ACTION:", DIM_ACTION)
         state = np.zeros(DIM_STATE)
         action = utilize.convert_action(np.ones(DIM_ACTION), NUM_PATHS)
-        print("DIM_STATE:", DIM_STATE, "DIM_ACTION:", DIM_ACTION)
         agent = DrlAgent(state, action, DIM_STATE, DIM_ACTION, NUM_PATHS)
         agents.append(agent)
         ret_c = tuple(action)
+        
     elif AGENT_TYPE == "MCF":
         action = []
         ansfile = open(getattr(FLAGS, "mcf_path"), "r")
         for i in ansfile.readlines():
             action.append(float(i.strip()))
-        #action_mcf = action
-    #print("ECNpktsList:", ECNpktsList)
-    else:
-        # for OSPF
-        #infact only one path for each session
-        action = utilize.convert_action(np.ones(DIM_ACTION), NUM_PATHS)
+    
+    else: # for OSPF
+        action = utilize.convert_action(np.ones(DIM_ACTION), NUM_PATHS) # in fact only one path for each session
 
     if not os.path.exists(DIR_LOG):
         os.mkdir(DIR_LOG)
@@ -427,7 +438,7 @@ if not SIM_FLAG:
     file_act_out = open(DIR_LOG + '/act.log', 'w', 1)
     file_thr_out = open(DIR_LOG + '/thr.log', 'w', 1)
     file_del_out = open(DIR_LOG + '/del.log', 'w', 1)
-    file_util_out = open(DIR_LOG + '/util.log', 'w', 1) # file record the max utility
+    file_util_out = open(DIR_LOG + '/util.log', 'w', 1) # file record the max util
 
 '''
 some notes:
@@ -437,11 +448,7 @@ dels = [[],[],[],...]#similar to pacNos, except that the content is time delays 
 thrs = [[],[],[],...]#tong shang
 ECNpkts = [[],[],[],...]#tong shang
 SrcEdgeNumDic
-
-When do distributed drl learning, multiple agent=DrlAgent(..) are needed, so the upper codes need to be modified
-the state of distributed drl learning also contains two kinds of parameters: delay and throughput #we may add, delete, replace parameters in the future
 '''
-
 '''
 extra notes:
 srcSessNum = [sessnum_of_src1, sessnum_of_src2, ...] the sess_num will be zero if there isnt any session with src as source node
@@ -454,31 +461,31 @@ For multi-agent each srcnode will have its own pacNos, dels, thrs, ECNpkts
 
 def split_arg(para):
     paraList = para.split(';')
-    pacNosList = paraList[1].split(',')
-    delsList = paraList[2].split(',')
-    thrsList = paraList[3].split(',')
-    ECNpktsList = paraList[4].split(',')
-    srcEdgeNumList = paraList[5].split(',') # being depretated
-    utilLossList = paraList[6].split(',') # being depretated ?????? loss hasnt been used and may has nan bug
-    maxUtil = float(paraList[7])
-    netUtilList = paraList[8].split(',')#get edge utilization of the whole network. added in 2018.7.19
-    sessPathUtilList = paraList[9].split(',')#get edge utilization of each path each session. added in 2018.7.20
-    sessUtilList = paraList[10].split(',')#get edge utilization of each edge. added in 2018.7.20
-    print("maxUtil:%s" %maxUtil)
+    pacNosList = paraList[1].split(',') # pkt number of each session and each path
+    delsList = paraList[2].split(',') # delay of each session and each path
+    thrsList = paraList[3].split(',') # throughput of each session and each path
+    ECNpktsList = paraList[4].split(',') # number of pkt tagged ECN of each session and path
+    srcEdgeNumList = paraList[5].split(',') # source edge number of each source node of session; -- depretated
+    utilLossList = paraList[6].split(',') # util and loss of each source edge; loss may has NAN bug; -- depretated
+    maxUtil = float(paraList[7]) # maximum utilization
+    netUtilList = paraList[8].split(',') # get edge util of the whole network. added in 2018.7.19
+    sessPathUtilList = paraList[9].split(',') # get edge utilization of each path each session. added in 2018.7.20
+    sessUtilList = paraList[10].split(',') # get edge utilization of each session. added in 2018.7.20
+    #print("maxUtil:%s" %maxUtil)
 
     sessionNum = len(pacNosList)
     pacNos = []
     dels = []
     thrs = []
-    ECNpkts = [] # for multi-agent the dimention is 3, otherwise, 2
+    ECNpkts = [] # for multi-agent the dimension is 3, otherwise, 2
     srcEdgeUL = {}
     path_util = [] # added at 7.20
     sess_util = [] # added at 7.20
     maxpath_util = [] # added at 7.21
     maxsess_util = [] # added at 7.23
     
-
-    #get edge utilization of each path each session. added in 2018.7.20
+	#parse util related info
+    # 1) get edge utilization of each path each session. added in 2018.7.20
     sessPathUtil = [] # util for each edge of each path of each session: shape:[[[...], ...], ...]
     for i in range(len(sessPathUtilList)):
         sessPathUtil.append([])
@@ -488,27 +495,22 @@ def split_arg(para):
             edgeUtilList = pathUtilList[j].split('-')
             for k in range(len(edgeUtilList)):
                 sessPathUtil[i][j].append(int(edgeUtilList[k])/10000)
-    #print("----->>>>>> sessPathUtil")
-    #print(sessPathUtil)
-    #get edge utilization of each edge. added in 2018.7.20
+    
+    # 2) get edge utilization of each edge. added in 2018.7.20
     sessUtil = [] # util for each path (sum util) of each session: shape:[[...], ...]
     for i in range(len(sessUtilList)):
         sessUtil.append([])
         edgeUtilList = sessUtilList[i].split(' ')
         for j in range(len(edgeUtilList)):
             sessUtil[i].append(int(edgeUtilList[j])/10000)
-    #print("----->>>>>> sessUtil")
-    #print(sessUtil)
 
-    ##get edge utilization of the whole network. added in 2018.7.19
+    # 3) get edge utilization of the whole network. added in 2018.7.19
     netUtil = [] # length = EDGE_NUM; deprecated on 7.20
     netUtilLen = len(netUtilList);
     for i in range(netUtilLen):
         netUtil.append(int(netUtilList[i])/10000)
-    #print("----->>>>>>>>>>>")
-    #print(netUtil)
 
-    # information of linked Edge
+    # 4) information of linked Edge
     k = 0
     for i in range(len(srcEdgeNumList)):
         pair_ = srcEdgeNumList[i].split(' ')
@@ -520,7 +522,6 @@ def split_arg(para):
             loss = float(utilLossList[k].split(' ')[1])
             srcEdgeUL[srcNode].append([util, loss])
             k += 1
-    #print(srcEdgeUL)
 
     if AGENT_TYPE == "multi_agent":
         # parse the information for each src Node
@@ -540,22 +541,22 @@ def split_arg(para):
             delsItem = list(map(float, delsList[i].split(' ')))
             thrsItem = list(map(float, thrsList[i].split(' ')))
             ECNpktsItem = list(map(int, ECNpktsList[i].split(' ')))
-            #print("delsItem:", delsItem)
+            
             for j in range(len(delsItem)):
                 delsItem[j] *= 1000
             pacNos[sessionSrc[i]].append(pacNosItem)
             dels[sessionSrc[i]].append(delsItem)
             thrs[sessionSrc[i]].append(thrsItem)
             ECNpkts[sessionSrc[i]].append(ECNpktsItem)
-           
+            
             # calculate path Utils or edgeUtils for each agent
-            sess_util[sessionSrc[i]] += sessUtil[i]
+            sess_util[sessionSrc[i]] += sessUtil[i]	# []+[4,5] = [4,5]
             #sess_util[sessionSrc[i]].append(sum(sessUtil[i]))
             temp_sessmax = 0.
             for j in sessPathUtil[i]:
-                #path_util[sessionSrc[i]] += j
-                path_util[sessionSrc[i]].append(sum(j))
-                path_util[sessionSrc[i]].append(max(j))
+                #path_util[sessionSrc[i]] += j # path util concatation
+                path_util[sessionSrc[i]].append(sum(j)) # path util sum
+                path_util[sessionSrc[i]].append(max(j)) # path util max
                 maxpath_util[sessionSrc[i]].append(max(j))
                 temp_sessmax = max(temp_sessmax, max(j))
             maxsess_util[sessionSrc[i]].append(temp_sessmax)
@@ -676,7 +677,7 @@ def split_arg(para):
                 thrs[i].append(float(thrsItem[j]))
                 ECNpkts[i].append(int(ECNpktsItem[j]))
     
-        print("pacNos:", pacNos)
+        #print("pacNos:", pacNos)
         #print("dels:", dels)
         #print("thrs:", thrs)
         #print("ECNpkts", ECNpkts)
@@ -707,10 +708,10 @@ def split_arg(para):
 def step(tmp):
     global ret_c
     state, reward, thr, dly, maxutil = split_arg(tmp)
-    print("state:", state)
-    print("reward:", reward)
-    print("thr:", thr)
-    print("dly:", dly)
+    #print("state:", state)
+    #print("reward:", reward)
+    #print("thr:", thr)
+    #print("dly:", dly)
 
     #if not np.all(state) or not np.all(reward):
     #    print('invalid...')
@@ -724,8 +725,8 @@ def step(tmp):
             if agents[i] != None:
                 #print("state:", state)
                 #print("predict:", i, state[i], reward[i], thr[i], dly[i])
-                print("state:", i, state[i])
-                print("reward:", reward[i])
+                #print("state:", i, state[i])
+                #print("reward:", reward[i])
                 ret_c_t.append(agents[i].predict(state[i], reward[i], thr[i], dly[i], maxutil[i]))
             else:
                 ret_c_t.append([])
@@ -738,53 +739,34 @@ def step(tmp):
         # for OSPF and MCF
         ret_c = action
 
-    print("action:", ret_c)
-    # print('rwd', reward)
-    # print('act', ret)
-    # print('act_c', ret_c)
+    #print("action:", ret_c)
+    print('rwd', [round(r_tmp, 3) if r_tmp != None else r_tmp for r_tmp in reward])
     # print(agent.timer)
 
     reward_t = 0.
     for i in reward:
         if i != None:
-            reward_t += i # for multiagent each agent has a reward, otherwise there is only one agent
+            reward_t += i # for multiagent each agent has a reward
 
     print(state, file=file_sta_out)
-    print(reward_t, file=file_rwd_out)
+    print(reward_t, file=file_rwd_out) # record the sum of rewards for plot, is it reasonable??????????
     print(ret_c, file=file_act_out)
 
     return ret_c
 
-'''
-lcy: a function that not being used?
-'''
-def sim_ddpg():
-    # print("come into sim_ddpg")
-    env = Env(DIM_STATE, DIM_ACTION, SEED, NUM_PATHS)
-    state = env.state_init
-    action = utilize.convert_action(env.state_init, NUM_PATHS)
-    agent = DrlAgent(state, action)
-    print('Best Solution:', env.best_sol)
-    for ep in range(MAX_EPISODES):
-        for ep in range(MAX_EP_STEPS):
-            sn, r = env.getReward(state, action)
-            action = agent.predict(sn, r)
-            state = sn
-            # print(state)
-        #state = action = env.reset()
-
 
 if __name__ == "__main__":
-    print("drlte ----------------------")
+    print("\n----Start agent----")
     msgTotalLen = 0
     msgRecvLen = 0
     msg = ""
+    update_times = 0
     while True:
         datarecv = tcpSocket.recv(BUFSIZE).decode()
         if len(datarecv) > 0:
             if msgTotalLen == 0:
                 totalLenStr = (datarecv.split(';'))[0]
-                print(totalLenStr, totalLenStr)
+                #print(totalLenStr, totalLenStr)
                 msgTotalLen = int(totalLenStr) + len(totalLenStr) + 1#1 is the length of ';'
                 if msgTotalLen == 2:#stop signal
                     print("simulation is over!")
@@ -793,8 +775,10 @@ if __name__ == "__main__":
             msg += datarecv
             if msgRecvLen < msgTotalLen: 
                 continue
+            #print("MSG:", msg) #get the complete message
             
-            #print("MSG:", msg)
+            print("\n< step %d >" % (update_times))
+            update_times += 1
             
             ret_c = step(msg)
             msg = ""
@@ -802,7 +786,6 @@ if __name__ == "__main__":
                 msg += str(round(ret_c[i], 3)) + ','
             msg += str(round(ret_c[len(ret_c)-1], 3))
             msg = str(len(msg)) + ';' + msg;
-            
             #print("retMSG:", msg)
 
             msgTotalLen = len(msg)
@@ -814,3 +797,6 @@ if __name__ == "__main__":
             msgRecvLen = 0
             msg = ""
     tcpSocket.close()
+    
+    
+    

@@ -1,7 +1,7 @@
 /*
 Simulation environment for DRL-TE
-V2.1
-Time:2018/8/26
+V3.1
+Time:2018/8/29
 LOG standard:
 NS_LOG_ERROR - error
 NS_LOG_WARN - warning
@@ -11,7 +11,7 @@ NS_LOG_FUNCTION - print function calling information and session related informa
 NS_LOG_LOGIC - print topology construction information and packet related information
 NS_LOG_ALL - all the information in sub-functions, no related function to LOG
 Changes:
-
+shutdown some prints
 */
 #include <stdio.h>
 #include <stdlib.h>
@@ -200,7 +200,7 @@ int main(int argc, char *argv[])
   double err_p=0.0;//?????0
   //for scale in
   //uint16_t ECNqThr=200;
-  uint16_t ECNqThr=20;
+  uint16_t ECNqThr=5;
   uint32_t seed=1;
   printEnable0=false;//debug now:remote server
   printEnable1=false;
@@ -860,7 +860,7 @@ void DrlRouting::initPyConnect()
   memcpy(Msg, msg.c_str(), msg.length());
   memcpy(Msg + msg.length(), sendbuf, bufpos);
   bufpos += msg.length();
-  cout << endl << bufpos << endl << Msg << endl;
+  ////cout << endl << bufpos << endl << Msg << endl;
 
   send(client_fd, Msg, bufpos, 0);
 }
@@ -1162,7 +1162,7 @@ void DrlRouting::update()
 
   saveToFile(spPacNos, spDels, spThrs, spECNpktNums);
   update(spPacNos, spDels, spThrs, spECNpktNums, srcEdges, utilList, lossList, maxUtil, netUtil, sessPathUtil, sessUtil);
-  #if 1
+  #if 0 // to see the pachet loss of each session
   cout << "sessSendPkts:" << endl;
   for(unsigned int i=0; i < sessSendPkts.size(); i++){
     cout << sessSendPkts[i] << "(";
