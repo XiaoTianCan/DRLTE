@@ -2,6 +2,7 @@ from socket import*
 import datetime
 import os
 import sys
+import math
 
 import utilize
 if not hasattr(sys, 'argv'):
@@ -275,7 +276,7 @@ if not SIM_FLAG:
     print("\n----Information list----")
     print("agent_type: %s" % (AGENT_TYPE))
     print("stamp_type: %s" % (REAL_STAMP))
-    
+    update_times = 0
     # receive the initial information
     ns3Server = (SERVER_IP, SERVER_PORT)
     tcpSocket = socket(AF_INET, SOCK_STREAM)
@@ -619,7 +620,14 @@ def split_arg(para):
                 if RWD_SELE[4] == "1":
                     #reward += np.mean(np.log(1 - np.clip(np.max(np.array(sess_util[i])), 0., 1.) + 1e-50)) + np.log(1 - np.clip(maxUtil, 0., 1.) + 1e-50) # infact we dont need np.mean() here
                     #reward += np.mean(np.log(1 - np.clip(np.array(maxpath_util[i]), 0., 1.) + 1e-50)) + 0.1 * np.log(1 - np.clip(maxUtil, 0., 1.) + 1e-50) # 8-14
+                    #8.30#reward += np.mean(np.log(1 - np.clip(np.array(maxsess_util[i]), 0., 1.) + 1e-50)) + 0.1 / len(maxsess_util[i]) * np.log(1 - np.clip(maxUtil, 0., 1.) + 1e-50)
+                    ## test by gn 2018.8.30 ##
+                    #reward += np.mean(np.log(1 - np.clip(np.array(maxsess_util[i]), 0., 1.) + 1e-50)) + (0.1 + 0.0001*update_times) * np.log(1 - np.clip(maxUtil, 0., 1.) + 1e-50)
                     reward += np.mean(np.log(1 - np.clip(np.array(maxsess_util[i]), 0., 1.) + 1e-50)) + 0.1 / len(maxsess_util[i]) * np.log(1 - np.clip(maxUtil, 0., 1.) + 1e-50)
+                    #reward += np.mean(np.log(1 - np.clip(np.array(maxsess_util[i]), 0., 1.) + 1e-50)) + 0.1 / max(maxsess_util[i]) * np.log(1 - np.clip(maxUtil, 0., 1.) + 1e-50)
+                    #reward += np.mean(np.log(1 - np.clip(np.array(maxsess_util[i]), 0., 1.) + 1e-50)) + 0.2 * math.exp(maxUtil-max(maxsess_util[i])) * np.log(1 - np.clip(maxUtil, 0., 1.) + 1e-50)
+                    #reward += np.mean(np.log(1 - np.clip(np.array(maxsess_util[i]), 0., 1.) + 1e-50)) + 10 / len(maxsess_util[i]) * np.log(1 - np.clip(maxUtil, 0., 1.) + 1e-50)
+                    ## test end ##
 
                 # calculate state_new for src i
                 state_new = []

@@ -69,7 +69,7 @@ class ActorNetwork:
         net = _inputs
         
         # temp modified by lcy
-        net = tflearn.fully_connected(net, 128, activation='LeakyReLU')
+        ##net = tflearn.fully_connected(net, 128, activation='LeakyReLU')
         # end modified
 
         net = tflearn.fully_connected(net, 64, activation='LeakyReLU')

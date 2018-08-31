@@ -45,6 +45,7 @@ class Explorer:
         self.__ep -= self.__ep / self.__steps
         # Learn from extrema solution
         tmp = (2. * np.random.random(self.__dim_act) - 1.)
+        #tmp /= 2 ## temporary test by gn at 2018.8.30
         # tmp *= utilize.get_ext_solution(self.__dim_act, self.__num_paths)
 
         # Learn from teacher
