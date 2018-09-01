@@ -53,6 +53,7 @@ flags.DEFINE_string("stamp_type", "__TIME_STAMP", "the stamp style for the name 
 flags.DEFINE_string("reward_type", "00001", "the type of the reward, from left to right, thr, delay, ecn, sess_maxutils+global_maxutils, agent_maxutils+global_maxutils")
 flags.DEFINE_string("agent_type", "multi_agent", "the method type for the agent include: drl_te, OSPF, MCF or multi_agent") # drlte maybe multiagent or not, for OSF and MCF multiagent must be False
 flags.DEFINE_string("mcf_path", None, "the answer files path for mcf method")
+flags.DEFINE_string("obl_path", None, "the answer files path for obl method")
 
 # flags for dynamic learning rate (for multiagent)
 flags.DEFINE_float("deta_w", 1., "the ordinary learning rate factor")
