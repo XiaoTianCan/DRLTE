@@ -1,7 +1,7 @@
 /*
 Simulation environment for DRL-TE
 V3.1
-Time:2018/8/29
+Time:2018/9/19
 LOG standard:
 NS_LOG_ERROR - error
 NS_LOG_WARN - warning
@@ -129,6 +129,7 @@ private:
   DataRate cap;
   string linkDelay;
   vector<DataRate> sendRates;
+  vector<double> sendRatesNoise;
   vector< vector< vector<int> > > sPaths;
   vector< vector< vector<int> > > ePaths;
   vector< vector<double> > sRatios;
@@ -145,7 +146,7 @@ private:
   vector<NetDeviceContainer> spDevices2;//for maximum utilization compute
   Ptr<RateErrorModel> errModel;
   vector< vector< Ptr<NetDevice> > > slDevices;
-  int srcTopoNode[500][20];//at most 500 nodes
+  int srcTopoNode[1000][50];//at most 500 nodes
   vector<pair<int,int>> srcEdges;
   vector<vector<uint32_t>> totalRxBytesV;
   vector<vector<uint32_t>> dropPacketsV;
@@ -276,7 +277,7 @@ DrlRouting::DrlRouting()
   data=new uint8_t[4000];//new a data block
   server_fd = -1;
   client_fd = -1;
-  memset(srcTopoNode, 0, 10000);
+  memset(srcTopoNode, 0, 50000);
 }
 
 DrlRouting::~DrlRouting()
@@ -503,6 +504,9 @@ void DrlRouting::initNodes()
   int maxNodei=0;//maximum node  id
   int maxTopoNodei=0;
   sessionNum=sPaths.size();
+  for(int i = 0; i < sessionNum; i++){
+    sendRatesNoise.push_back(0.0);
+  }
   pathNum=0;
   for(int i=0; i<sessionNum; i++) {
     srcTopoNode[sPaths[i][0][1]][0] = 0;
@@ -532,7 +536,7 @@ void DrlRouting::initNodes()
   }
   internet.Install(nodes);//install protocol stack
   vector<Ptr <NetDevice> > lDevices;
-  for(int i=0;i<topoNodeNum;i++){
+  for(int i=0;i<topoNodeNum+1;i++){
     slDevices.push_back(lDevices);
   }
   ////cout << "topoNodeNum: " << topoNodeNum << endl;
@@ -544,6 +548,7 @@ void DrlRouting::initPaths()
   NS_LOG_FUNCTION("initPaths()");
   p2p.SetDeviceAttribute("DataRate", DataRateValue(cap));//set link attributes
   p2p.SetChannelAttribute("Delay", StringValue(linkDelay));
+
   //for random bottle neck link
   //p2pB.SetDeviceAttribute("DataRate", DataRateValue(capB));//set link attributes
   //p2pB.SetChannelAttribute("Delay", StringValue(linkDelay));
@@ -599,7 +604,6 @@ void DrlRouting::initPaths()
           //cout << is << " " << ib << endl;
           spDevices2.push_back(step);
         }
-
         if (srcTopoNode[i1][0] > 0) {
           int l;
           for(l = 1; l <= srcTopoNode[i1][0]; l++) {
@@ -610,7 +614,6 @@ void DrlRouting::initPaths()
             slDevices[i1].push_back(nd);
           }
         }
-        
         if (srcTopoNode[i2][0] > 0) {
           int l;
           for(l = 1; l <= srcTopoNode[i2][0]; l++) {
@@ -902,9 +905,10 @@ void DrlRouting::randSendData(int iSession, uint8_t *data)//size is the total am
   sessSendPkts[iSession] += 1;
   #if 1//my way
   double dataRate_b=sendRates[iSession].GetBitRate();
-  //for burst test 2018.7.16
-  if(burstFlag && time>=7000 && iSession <= 2){
-    dataRate_b = dataRate_b*2;
+  //for flow change test 2018.9.18
+  if(burstFlag && (time <= 9000)){
+    dataRate_b = dataRate_b*(1.0 + sendRatesNoise[iSession]);
+    //dataRate_b = dataRate_b*(1.2);
   }
   if(dataRate_b==0) return;
   double unit_t = 0.001;//s
@@ -935,6 +939,14 @@ void DrlRouting::randSendData(int iSession, uint8_t *data)//size is the total am
 void DrlRouting::update()
 {
   upNum++;
+  if(burstFlag && (upNum % 2000 == 1)){
+    cout << "ssss" << endl;
+    for(unsigned int i = 0; i < sendRates.size(); i++){
+      double noise = 2*(getRand()*0.1 - 0.05);
+      sendRatesNoise[i] = noise;
+      cout << noise << endl;
+    }
+  }
   double time=Simulator::Now().GetSeconds();
   NS_LOG_INFO(std::endl<<"update(), time:"<<time);
   vector<vector<double>> spDels;
@@ -1160,7 +1172,7 @@ void DrlRouting::update()
   }
 
 
-  saveToFile(spPacNos, spDels, spThrs, spECNpktNums);
+  //saveToFile(spPacNos, spDels, spThrs, spECNpktNums); //comment at 2018.8.30
   update(spPacNos, spDels, spThrs, spECNpktNums, srcEdges, utilList, lossList, maxUtil, netUtil, sessPathUtil, sessUtil);
   #if 0 // to see the pachet loss of each session
   cout << "sessSendPkts:" << endl;
@@ -1381,8 +1393,8 @@ void DrlRouting::update(vector<vector<int>> pacNos, vector<vector<double>> dels,
       msgLen = send(client_fd, sendbuf, blockSize, 0);
     }
     else {
-    	memcpy(sendbuf, Msg + i*blockSize, bufpos-blockSize*i);
-    	msgLen = send(client_fd, sendbuf, bufpos-blockSize*i, 0);
+      memcpy(sendbuf, Msg + i*blockSize, bufpos-blockSize*i);
+      msgLen = send(client_fd, sendbuf, bufpos-blockSize*i, 0);
     }
     
     //cout << "msgLen:" << msgLen << endl;

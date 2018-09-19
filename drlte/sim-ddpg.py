@@ -72,11 +72,12 @@ AGENT_TYPE = getattr(FLAGS, "agent_type")
 
 DETA_W = getattr(FLAGS, "deta_w")
 DETA_L = getattr(FLAGS, "deta_l") # for multiagent deta_w < deta_l
-EXP_DEC = getattr(FLAGS, "explo_dec")
-BATCH_MON = getattr(FLAGS, "batch_mon")
+
+EXP_EPOCH = getattr(FLAGS, "explore_epochs")
+EXP_DEC = getattr(FLAGS, "explore_decay")
 
 class DrlAgent:
-    def __init__(self, state_init, action_init, dim_state, dim_action, num_paths):
+    def __init__(self, state_init, action_init, dim_state, dim_action, num_paths, exp_action):
         sess = tf.Session()
 
         self.__dim_state = dim_state
@@ -99,8 +100,7 @@ class DrlAgent:
         #self.__summary.build()
         #self.__summary.write_vars(FLAGS)
         
-        self.__explorer = Explorer(EP_BEGIN, EP_END, EP_ST, dim_action, num_paths, SEED)
-        #self.__explorer = Explorer(EP_BEGIN, EP_END, EXP_DEC, dim_action, num_paths, SEED)
+        self.__explorer = Explorer(EP_BEGIN, EP_END, EP_ST, dim_action, num_paths, SEED, exp_action, EXP_EPOCH, EXP_DEC)
 
         sess.run(tf.global_variables_initializer())
         self.__actor.update_target_paras()
@@ -120,12 +120,6 @@ class DrlAgent:
         self.__detaw = DETA_W
         self.__detal = DETA_L
 
-        # for batch repeated used modified on 7.23
-        self.__maxutil_curt = -1. 
-        self.__batch_curt = None
-        self.__weights_curt = None
-        self.__indices_curt = None
-        self.__batch_mon = BATCH_MON # batch momentum
         
     @property
     def timer(self):
@@ -158,6 +152,7 @@ class DrlAgent:
             self.__episode += 1
             self.__ep_reward = 0.
             self.__ep_avg_max_q = 0.
+            ###self.__explorer.setPara()#adde by gn 2018.9.18 for adaptive test
 
         action_original = self.__actor.predict([state_new])[0]
 
@@ -184,24 +179,16 @@ class DrlAgent:
         if len(self.__prioritized_replay) > MINI_BATCH:
             curr_q = self.__critic.predict_target([state_new], self.__actor.predict([state_new]))[0]
             if curr_q[0] > target_q[0]:
-                self.train(True, maxutil)
+                self.train(True)
             else:
-                self.train(False, maxutil)
-            self.__maxutil_curt = maxutil # for batch momentum
+                self.train(False)
 
         return action
 
-    def train(self, curr_stat, maxutil):
+    def train(self, curr_stat):
         self.__beta += (1-self.__beta) / EP_ST
-        if self.__batch_mon and maxutil < self.__maxutil_curt + 1e-2 and maxutil < 1.0:
-            batch = self.__batch_curt
-            weights = self.__weights_curt
-            indices = self.__indices_curt
-        else:
-            batch, weights, indices = self.__prioritized_replay.select(self.__beta)
-            self.__batch_curt = batch
-            self.__weights_curt = weights
-            self.__indices_curt = indices
+        
+        batch, weights, indices = self.__prioritized_replay.select(self.__beta)
         weights = np.expand_dims(weights, axis=1)
 
         batch_state = []
@@ -356,14 +343,28 @@ if not SIM_FLAG:
 
 	# init routing/scheduling policy: multi_agent, drl_te, mcf, ospf
     if AGENT_TYPE == "multi_agent":
-        AGENT_NUM = max(sessionSrc) + 1 # hear AGENT_NUM is not equal to the real valid "agent number"
+        #modified by lcy 2018-9-1
+        action_path = getattr(FLAGS, "action_path")
+        if action_path != None:
+            action = []
+            action_file = open(action_path, 'r')
+            for i in action_file.readlines():
+                action.append(float(i.strip()))
+        else:
+            action = utilize.convert_action(np.ones(DIM_ACTION), NUM_PATHS)
+        #end modified
+        
+        AGENT_NUM = max(sessionSrc) + 1 # here AGENT_NUM is not equal to the real valid "agent number"
         srcSessNum = [0] * AGENT_NUM
         srcPathNum = [0] * AGENT_NUM
         srcPathUtilNum = [0] * AGENT_NUM # utils num for each src, modified at 7.20
         srcUtilNum = [0] * AGENT_NUM # sum util num for each src (sum util for each path), modified at 7.20
         srcPaths = []
+        srcActs = [] # Added by lcy at 9.1
         for i in range(AGENT_NUM):
             srcPaths.append([])
+            srcActs.append([])
+        actp = 0
         for i in range(len(sessionSrc)):
             srcSessNum[sessionSrc[i]] += 1
             srcPathNum[sessionSrc[i]] += NUM_PATHS[i]
@@ -371,6 +372,9 @@ if not SIM_FLAG:
 
             srcUtilNum[sessionSrc[i]] += sessUtilNum[i]
             srcPathUtilNum[sessionSrc[i]] += sum(sessPathUtilNum[i])
+
+            srcActs[sessionSrc[i]] += action[actp : actp + NUM_PATHS[i]];
+            actp += NUM_PATHS[i]
 
         #print("srcSessNum", srcSessNum)
         #print("srcPathNum", srcPathNum)
@@ -404,12 +408,12 @@ if not SIM_FLAG:
 
                 state = np.zeros(temp_dim_s) 
                 action = utilize.convert_action(np.ones(srcPathNum[i]), srcPaths[i])
-                agent = DrlAgent(list(state), action, temp_dim_s, srcPathNum[i], srcPaths[i]) 
+                agent = DrlAgent(list(state), action, temp_dim_s, srcPathNum[i], srcPaths[i], srcActs[i]) 
 
             else:
                 agent = None
             agents.append(agent)
-        action = utilize.convert_action(np.ones(DIM_ACTION), NUM_PATHS)
+        
         ret_c = tuple(action)
         
     elif AGENT_TYPE == "drl_te":
@@ -434,6 +438,12 @@ if not SIM_FLAG:
         for i in ansfile.readlines():
             action.append(float(i.strip()))
 
+    elif AGENT_TYPE == "OR":
+        action = []
+        ansfile = open(getattr(FLAGS, "or_path"), "r")
+        for i in ansfile.readlines():
+            action.append(float(i.strip()))
+
     else: # for OSPF
         action = utilize.convert_action(np.ones(DIM_ACTION), NUM_PATHS) # in fact only one path for each session
 
@@ -446,6 +456,7 @@ if not SIM_FLAG:
     file_thr_out = open(DIR_LOG + '/thr.log', 'w', 1)
     file_del_out = open(DIR_LOG + '/del.log', 'w', 1)
     file_util_out = open(DIR_LOG + '/util.log', 'w', 1) # file record the max util
+    file_multirwd_out = open(DIR_LOG + '/multirwd.log', 'w', 1) # lcy 9.15 print the rwd for each agent
 
 '''
 some notes:
@@ -605,24 +616,26 @@ def split_arg(para):
                 reward = 0.
                 if RWD_SELE[0] == "1":
                     #reward += np.sum(np.log(np.array(thr_sum) + 1e-5)) # temporarily replaced by cooperate reward
-                    reward += np.mean(np.log(1 - np.clip(np.array(maxsess_util[i]), 0., 1.) + 1e-50)) + 0.1 * np.log(1 - np.clip(maxUtil, 0., 1.) + 1e-50)
+                    #reward += np.mean(np.log(1 - np.clip(np.array(maxsess_util[i]), 0., 1.) + 1e-50)) + 0.1 * np.log(1 - np.clip(maxUtil, 0., 1.) + 1e-50) #9-16
+                    reward += 0.05 * (np.mean(np.log(1 - np.clip(np.array(maxsess_util[i]), 0., 1.) + 1e-30)) + 0.1 / len(maxsess_util[i]) * np.log(1 - np.clip(maxUtil, 0., 1.) + 1e-30)) 
                 if RWD_SELE[1] == "1":
                     #reward += np.sum(-DELTA * np.log(np.array(delay_sum) + 1e-5)) #temporarily replaced by cooperated reward
                     #reward += np.mean(np.log(1 - np.clip(np.max(np.array(sess_util[i])), 0., 1.) + 1e-50)) + 10 * np.log(1 - np.clip(maxUtil, 0., 1.) + 1e-50)
                     #reward += np.mean(np.log(1 - np.clip(np.array(maxsess_util[i]), 0., 1.) + 1e-50)) + 0.05 * np.log(1 - np.clip(maxUtil, 0., 1.) + 1e-50) # 8-14
                     #reward += np.mean(np.log(1 - np.clip(np.array(maxsess_util[i]), 0., 1.) + 1e-50)) + 10.0 / len(maxsess_util[i]) * np.log(1 - np.clip(maxUtil, 0., 1.) + 1e-50) # 8-18
-                    reward += np.mean(- 1.0 / (1 - np.clip(np.array(maxsess_util[i]), 0., 1.) + 1e-50)) + 0.1 / len(maxsess_util[i]) * (- 1.0) / (1 - np.clip(maxUtil, 0., 1.) + 1e-50)
+                    #reward += np.mean(- 1.0 / (1 - np.clip(np.array(maxsess_util[i]), 0., 1.) + 1e-50)) + 0.1 / len(maxsess_util[i]) * (- 1.0) / (1 - np.clip(maxUtil, 0., 1.) + 1e-50) # 9-17
+                    reward += - 0.1 * (np.mean(np.where(np.array(maxsess_util[i]) / 1.6 < 1., np.array(maxsess_util[i]) / 1.6, 1000.)) + DELTA / len(maxsess_util[i]) * np.where(maxUtil / 1.6 < 1., maxUtil / 1.6, 1000.))
                 if RWD_SELE[2] == "1":
                     #reward += np.sum(-DELTA * np.log(np.array(ecnpkt) + 1e-5)) # temporarily replaced by sessutil + maxutil rwd
                     #reward += np.mean(np.log(1 - np.clip(np.array(sess_util[i]), 0., 1.) + 1e-50)) + np.log(1 - np.clip(maxUtil, 0., 1.) + 1e-50)
                     #reward += np.mean(np.log(1 - np.clip(np.array(maxsess_util[i]), 0., 1.) + 1e-50)) + 0.5 * np.log(1 - np.clip(maxUtil, 0., 1.) + 1e-50) # 8-14
-                    reward += np.mean(np.log(1 - np.clip(np.array(maxsess_util[i]), 0., 1.) + 1e-50)) + 1.0 / len(maxsess_util[i]) * np.log(1 - np.clip(maxUtil, 0., 1.) + 1e-50)
+                    reward += np.mean(np.log(1 - np.clip(np.array(maxsess_util[i]), 0., 1.) + 1e-50)) + 5.0 / len(maxsess_util[i]) * np.log(1 - np.clip(maxUtil, 0., 1.) + 1e-50)
                 if RWD_SELE[3] == "1":
                     #reward += np.mean(np.log(1 - np.clip(np.array(maxsess_util[i]), 0., 1.) + 1e-50)) + np.log(1 - np.clip(maxUtil, 0., 1.) + 1e-50) # 8-18
                     #reward += np.sum(np.log(1 - np.clip(np.array(sess_util[i]), 0., 1.) + 1e-50))
                     #reward += -np.sum(np.exp(5 * np.array(sess_util[i]))) # bug reward
                     # reward += -np.sum(np.exp(10 * np.array(netUtil)))    # being deprecated
-                    reward += np.mean(- 1.0 / (1 - np.clip(np.array(maxsess_util[i]), 0., 1.) + 1e-5)) + 0.1 / len(maxsess_util[i]) * (- 1.0) / (1 - np.clip(maxUtil, 0., 1.) + 1e-5)
+                    reward += np.mean(- 1.0 / (1 - np.clip(np.array(maxsess_util[i]), 0., 1.) + 1e-5)) + 5. / len(maxsess_util[i]) * (- 1.0) / (1 - np.clip(maxUtil, 0., 1.) + 1e-5)
                 if RWD_SELE[4] == "1":
                     #reward += np.mean(np.log(1 - np.clip(np.max(np.array(sess_util[i])), 0., 1.) + 1e-50)) + np.log(1 - np.clip(maxUtil, 0., 1.) + 1e-50) # infact we dont need np.mean() here
                     #reward += np.mean(np.log(1 - np.clip(np.array(maxpath_util[i]), 0., 1.) + 1e-50)) + 0.1 * np.log(1 - np.clip(maxUtil, 0., 1.) + 1e-50) # 8-14
@@ -630,6 +643,9 @@ def split_arg(para):
                     
                     ## test by gn 2018.8.30 ##
                     reward += np.mean(np.log(1 - np.clip(np.array(maxsess_util[i]), 0., 1.) + 1e-50)) + 0.1 / len(maxsess_util[i]) * np.log(1 - np.clip(maxUtil, 0., 1.) + 1e-50)
+                    #reward += np.mean(np.log(1 - np.clip(np.array(maxsess_util[i]), 0., 1.) + 1e-10)) + 0.1 / len(maxsess_util[i]) * np.log(1 - np.clip(maxUtil, 0., 1.) + 1e-10)
+                    #reward += np.mean(np.log(1 - np.clip(np.array(maxsess_util[i]), 0., 1.)/2.5 + 1e-50)) + 0.1 / len(maxsess_util[i]) * np.log(1 - np.clip(maxUtil/2.5, 0., 1.) + 1e-50)
+                    #reward += np.mean(-0.7*np.clip(np.array(maxsess_util[i]), 0., 1.)) + 0.1 / len(maxsess_util[i]) * (-0.7) * np.clip(maxUtil, 0., 1.)
                     ## test end ##
 
                 # calculate state_new for src i
@@ -652,6 +668,7 @@ def split_arg(para):
                     # state_new += netUtil # deprecated on 7.20
                     state_new += path_util[i]
                 if FEAT_SELE[7] == "1":
+                    ###tmp = [kk/1.8 for kk in sess_util[i]]      ##2018.9.13
                     state_new += sess_util[i]
                 #state_new = np.concatenate((thr, delay))
 
@@ -747,8 +764,8 @@ def step(tmp):
     elif AGENT_TYPE == "drl_te":
         ret_c = tuple(agents[0].predict(state[0], reward[0], thr[0], dly[0], maxutil[0]))
     else:
-        # for OSPF and MCF
-        ret_c = action
+        # for OSPF and MCF and OBL
+        ret_c = tuple(action)
 
     #print("action:", ret_c)
     print('rwd', [round(r_tmp, 3) if r_tmp != None else r_tmp for r_tmp in reward])
@@ -762,6 +779,8 @@ def step(tmp):
     print(state, file=file_sta_out)
     print(reward_t, file=file_rwd_out) # record the sum of rewards for plot, is it reasonable??????????
     print(ret_c, file=file_act_out)
+
+    print(reward, file=file_multirwd_out)
 
     return ret_c
 

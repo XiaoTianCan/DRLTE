@@ -35,12 +35,12 @@ flags.DEFINE_integer('epsilon_steps', 1200, "the steps for epsilon random")
 flags.DEFINE_float('learning_rate_actor', 0.0001, "learning rate for actor network")
 flags.DEFINE_float('learning_rate_critic', 0.001, "learning rate for critic network")
 
-flags.DEFINE_float('gamma', 0.01, "discount value for reward")
+flags.DEFINE_float('gamma', 0.99, "discount value for reward")
 flags.DEFINE_float('alpha', 0.6, 'prioritized replay buffer parameter alpha')
 flags.DEFINE_float('beta', 0.5, 'prioritized replay buffer parameter IS')
 flags.DEFINE_float('mu', 0.6, 'Prioritized replay buffer parameter DDPG')
 flags.DEFINE_float('tau', 0.001, "tau for target network update")
-flags.DEFINE_float('delta', 1., 'trade off throughput and delay')
+flags.DEFINE_float('delta', 0.1, 'trade off throughput and delay')
 
 flags.DEFINE_string('dir_sum', home_out('sum') + '/{0}', "the path of tf summary")
 flags.DEFINE_string('dir_raw', home_out('raw') + '/{0}', 'the path of raw data')
@@ -51,12 +51,17 @@ flags.DEFINE_string('dir_log', home_out('log') + '/{0}', 'the path of logs')
 flags.DEFINE_string("feature_select", "00000001", "from left to right: delay(path and sess), thr_per_path, thr_per_sess, linked edge info, ecn, utils for each edge of each path of each session, utils for each edge of each session(uniqued)")
 flags.DEFINE_string("stamp_type", "__TIME_STAMP", "the stamp style for the name of log directory, may be TIME_STAMP or other specifial dir name show the features of the expr")
 flags.DEFINE_string("reward_type", "00001", "the type of the reward, from left to right, thr, delay, ecn, sess_maxutils+global_maxutils, agent_maxutils+global_maxutils")
-flags.DEFINE_string("agent_type", "multi_agent", "the method type for the agent include: drl_te, OSPF, MCF or multi_agent") # drlte maybe multiagent or not, for OSF and MCF multiagent must be False
+flags.DEFINE_string("agent_type", "multi_agent", "the method type for the agent include: drl_te, OSPF, MCF, OBL or multi_agent") 
 flags.DEFINE_string("mcf_path", None, "the answer files path for mcf method")
 flags.DEFINE_string("obl_path", None, "the answer files path for obl method")
+flags.DEFINE_string("or_path", None, "the answer files path for OR method")
+flags.DEFINE_string("action_path", None, "the original action for the explorer"); # modified by lcy: 2018-9-1 
 
 # flags for dynamic learning rate (for multiagent)
 flags.DEFINE_float("deta_w", 1., "the ordinary learning rate factor")
 flags.DEFINE_float("deta_l", 1., "the learning rate factor for the bad situation") # deta_l > deta_w for multiagent
-flags.DEFINE_float("explo_dec", 300., "the decfactor for the explorer in exp decline") # may be not being used in the final version, only for test 2018.7.18
-flags.DEFINE_boolean("batch_mon", False, "whether to use previous batch to minimize maxutil")
+
+# flags for exploration episodes
+flags.DEFINE_integer("explore_epochs", 0, "the explore times before the final exploration")
+flags.DEFINE_integer("explore_decay", 300, "the learning decay step for the pre-exploration")
+
