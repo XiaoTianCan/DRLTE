@@ -46,6 +46,7 @@ flags.DEFINE_string('dir_sum', home_out('sum') + '/{0}', "the path of tf summary
 flags.DEFINE_string('dir_raw', home_out('raw') + '/{0}', 'the path of raw data')
 flags.DEFINE_string('dir_mod', home_out('mod') + '/{0}', 'the path of saved models')
 flags.DEFINE_string('dir_log', home_out('log') + '/{0}', 'the path of logs')
+flags.DEFINE_string('dir_ckpoint', home_out('ckpoint') + '/{0}', 'the path of checkpoints')
 
 # flags for features selection
 flags.DEFINE_string("feature_select", "00000001", "from left to right: delay(path and sess), thr_per_path, thr_per_sess, linked edge info, ecn, utils for each edge of each path of each session, utils for each edge of each session(uniqued)")
@@ -65,3 +66,5 @@ flags.DEFINE_float("deta_l", 1., "the learning rate factor for the bad situation
 flags.DEFINE_integer("explore_epochs", 0, "the explore times before the final exploration")
 flags.DEFINE_integer("explore_decay", 300, "the learning decay step for the pre-exploration")
 
+# flags for para reload
+flags.DEFINE_string("ckpt_path", None, "the checkpoint path, None means not using checkpoints to initialize the paramaters")

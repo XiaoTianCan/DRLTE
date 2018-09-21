@@ -63,6 +63,7 @@ DIR_SUM = getattr(FLAGS, 'dir_sum').format(REAL_STAMP)
 DIR_RAW = getattr(FLAGS, 'dir_raw').format(REAL_STAMP)
 DIR_MOD = getattr(FLAGS, 'dir_mod').format(REAL_STAMP)
 DIR_LOG = getattr(FLAGS, 'dir_log').format(REAL_STAMP)
+DIR_CKPOINT = getattr(FLAGS, 'dir_ckpoint').format(REAL_STAMP)
 
 #reward = np.sum(np.log(np.array(thr_sum)) - DELTA * np.log(np.array(ecnpkt) + 1e-10))
 
@@ -76,9 +77,11 @@ DETA_L = getattr(FLAGS, "deta_l") # for multiagent deta_w < deta_l
 EXP_EPOCH = getattr(FLAGS, "explore_epochs")
 EXP_DEC = getattr(FLAGS, "explore_decay")
 
+CKPT_PATH = getattr(FLAGS, "ckpt_path")
+
 class DrlAgent:
-    def __init__(self, state_init, action_init, dim_state, dim_action, num_paths, exp_action):
-        sess = tf.Session()
+    def __init__(self, state_init, action_init, dim_state, dim_action, num_paths, exp_action, sess):
+        #sess = tf.Session() # temporarily modified by lcy 9-20
 
         self.__dim_state = dim_state
         self.__dim_action = dim_action
@@ -102,7 +105,7 @@ class DrlAgent:
         
         self.__explorer = Explorer(EP_BEGIN, EP_END, EP_ST, dim_action, num_paths, SEED, exp_action, EXP_EPOCH, EXP_DEC)
 
-        sess.run(tf.global_variables_initializer())
+        sess.run(tf.global_variables_initializer()) # infact we don't need to init global_variables here, however, it doesn't cause other problems except wasting time. 9.20 by lcy
         self.__actor.update_target_paras()
         self.__critic.update_target_paras()
 
@@ -341,7 +344,7 @@ if not SIM_FLAG:
     #print("sessionSrc:", sessionSrc)
     #print("srcEdgeNumDic:", srcEdgeNumDic)
 
-	# init routing/scheduling policy: multi_agent, drl_te, mcf, ospf
+    # init routing/scheduling policy: multi_agent, drl_te, mcf, ospf
     if AGENT_TYPE == "multi_agent":
         #modified by lcy 2018-9-1
         action_path = getattr(FLAGS, "action_path")
@@ -381,6 +384,7 @@ if not SIM_FLAG:
         #print("srcPaths", srcPaths)
         
         print("\nConstructing distributed agents ... \n")
+        globalSess = tf.Session()
         for i in range(AGENT_NUM):
             if (srcSessNum[i] > 0):
                 # calculate the state dimension for each agent
@@ -408,12 +412,21 @@ if not SIM_FLAG:
 
                 state = np.zeros(temp_dim_s) 
                 action = utilize.convert_action(np.ones(srcPathNum[i]), srcPaths[i])
-                agent = DrlAgent(list(state), action, temp_dim_s, srcPathNum[i], srcPaths[i], srcActs[i]) 
+                agent = DrlAgent(list(state), action, temp_dim_s, srcPathNum[i], srcPaths[i], srcActs[i], globalSess) 
 
             else:
                 agent = None
             agents.append(agent)
         
+        # modified by lcy for paramaters save and restore    
+        globalSess.run(tf.global_variables_initializer())
+        #print("global variables: ", tf.global_variables())
+        #print("tf.trainable variables:", tf.trainable_variables())
+        globalSaver = tf.train.Saver(tf.global_variables())
+        #CKPT_PATH = DIR_CKPOINT + "/ckpt"
+        if CKPT_PATH != None:
+            globalSaver.restore(globalSess, CKPT_PATH)
+        # end modified
         ret_c = tuple(action)
         
     elif AGENT_TYPE == "drl_te":
@@ -449,6 +462,8 @@ if not SIM_FLAG:
 
     if not os.path.exists(DIR_LOG):
         os.mkdir(DIR_LOG)
+    if not os.path.exists(DIR_CKPOINT):
+        os.mkdir(DIR_CKPOINT)
 
     file_sta_out = open(DIR_LOG + '/sta.log', 'w', 1)
     file_rwd_out = open(DIR_LOG + '/rwd.log', 'w', 1)
@@ -502,7 +517,7 @@ def split_arg(para):
     maxpath_util = [] # added at 7.21
     maxsess_util = [] # added at 7.23
     
-	#parse util related info
+    #parse util related info
     # 1) get edge utilization of each path each session. added in 2018.7.20
     sessPathUtil = [] # util for each edge of each path of each session: shape:[[[...], ...], ...]
     for i in range(len(sessPathUtilList)):
@@ -568,7 +583,7 @@ def split_arg(para):
             ECNpkts[sessionSrc[i]].append(ECNpktsItem)
             
             # calculate path Utils or edgeUtils for each agent
-            sess_util[sessionSrc[i]] += sessUtil[i]	# []+[4,5] = [4,5]
+            sess_util[sessionSrc[i]] += sessUtil[i] # []+[4,5] = [4,5]
             #sess_util[sessionSrc[i]].append(sum(sessUtil[i]))
             temp_sessmax = 0.
             for j in sessPathUtil[i]:
@@ -624,7 +639,7 @@ def split_arg(para):
                     #reward += np.mean(np.log(1 - np.clip(np.array(maxsess_util[i]), 0., 1.) + 1e-50)) + 0.05 * np.log(1 - np.clip(maxUtil, 0., 1.) + 1e-50) # 8-14
                     #reward += np.mean(np.log(1 - np.clip(np.array(maxsess_util[i]), 0., 1.) + 1e-50)) + 10.0 / len(maxsess_util[i]) * np.log(1 - np.clip(maxUtil, 0., 1.) + 1e-50) # 8-18
                     #reward += np.mean(- 1.0 / (1 - np.clip(np.array(maxsess_util[i]), 0., 1.) + 1e-50)) + 0.1 / len(maxsess_util[i]) * (- 1.0) / (1 - np.clip(maxUtil, 0., 1.) + 1e-50) # 9-17
-                    reward += - 0.1 * (np.mean(np.where(np.array(maxsess_util[i]) / 1.6 < 1., np.array(maxsess_util[i]) / 1.6, 1000.)) + DELTA / len(maxsess_util[i]) * np.where(maxUtil / 1.6 < 1., maxUtil / 1.6, 1000.))
+                    reward += - 0.1 * (np.mean(np.where(np.array(maxsess_util[i]) < 10., np.array(maxsess_util[i]), 1000.)) + DELTA / len(maxsess_util[i]) * np.where(maxUtil < 10., maxUtil, 1000.))
                 if RWD_SELE[2] == "1":
                     #reward += np.sum(-DELTA * np.log(np.array(ecnpkt) + 1e-5)) # temporarily replaced by sessutil + maxutil rwd
                     #reward += np.mean(np.log(1 - np.clip(np.array(sess_util[i]), 0., 1.) + 1e-50)) + np.log(1 - np.clip(maxUtil, 0., 1.) + 1e-50)
@@ -826,6 +841,15 @@ if __name__ == "__main__":
             msgTotalLen = 0
             msgRecvLen = 0
             msg = ""
+    
+    # modified by lcy 9.20 for global variables load and store
+    #print("final global variables: ", tf.global_variables())
+    print("saving checkpoint...")
+    if AGENT_TYPE == "multi_agent":  
+        globalSaver.save(globalSess, DIR_CKPOINT + "/ckpt")
+    print(DIR_CKPOINT)
+    # end modified
+    
     tcpSocket.close()
     
     
